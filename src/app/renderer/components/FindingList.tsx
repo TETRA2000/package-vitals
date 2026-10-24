@@ -57,7 +57,7 @@ export function FindingList({ rows, selectedIndex, onSelect, now }: FindingListP
               <span>{`${r.packageName} (${r.ecosystem})`}</span>
               <span>{r.fullName}</span>
               <span className="summary">{`${r.ghsaId}: ${r.summary}`}</span>
-              <span>{formatAge(r.createdAt, now)}</span>
+              <span className="age">{formatAge(r.createdAt, now)}</span>
             </div>
           );
         })}

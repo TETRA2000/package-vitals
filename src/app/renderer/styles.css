@@ -87,7 +87,7 @@ header > [role='alert'], .app > [role='alert'] { margin: 8px 24px 0; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) min(360px, 35%);
   grid-template-rows: minmax(0, 1fr);
   gap: 16px;
 }
@@ -106,8 +106,11 @@ header > [role='alert'], .app > [role='alert'] { margin: 8px 24px 0; }
 }
 .finding-row:hover { background: var(--hover); }
 .finding-row[aria-selected='true'] { background: var(--accent); color: var(--accent-text); }
+/* In a narrow window the summary gives way first, then the package and repo; severity and age always show. */
+.finding-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .finding-row .severity { flex: none; width: 4.5em; font-weight: 600; }
-.finding-row .summary { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.finding-row .summary { flex: 1 1 0; }
+.finding-row .age { flex: none; }
 
 .side-panel { min-height: 0; overflow: auto; overflow-wrap: anywhere; padding: 0 4px; }
 .side-panel h3 { margin: 4px 0 8px; }
