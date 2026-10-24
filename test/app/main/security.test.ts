@@ -87,7 +87,7 @@ describe('security', () => {
     expect(openHandler?.({ url: 'https://evil.example/' })).toEqual({ action: 'deny' });
   });
 
-  it('denies every permission and cancels remote requests', () => {
+  it('denies every permission, cancels remote requests, and blocks downloads', () => {
     type RequestHandler = (wc: unknown, permission: string, callback: (granted: boolean) => void) => void;
     type CheckHandler = (wc: unknown, permission: string) => boolean;
     type BeforeRequest = (details: { url: string }, callback: (r: { cancel: boolean }) => void) => void;
@@ -95,13 +95,13 @@ describe('security', () => {
     let checkHandler: CheckHandler | undefined;
     let filter: unknown;
     let beforeRequest: BeforeRequest | undefined;
-    const ses = {
+    const ses = Object.assign(new EventEmitter(), {
       setPermissionRequestHandler: (h: RequestHandler) => { requestHandler = h; },
       setPermissionCheckHandler: (h: CheckHandler) => { checkHandler = h; },
       webRequest: {
         onBeforeRequest: (f: unknown, l: BeforeRequest) => { filter = f; beforeRequest = l; },
       },
-    };
+    });
     hardenSession(ses as unknown as SessionLike);
 
     for (const permission of ['media', 'clipboard-read']) {
@@ -119,5 +119,10 @@ describe('security', () => {
     };
     expect(answer('https://example.com/')).toHaveBeenCalledExactlyOnceWith({ cancel: true });
     expect(answer('app://vitals/index.html')).toHaveBeenCalledExactlyOnceWith({ cancel: false });
+
+    expect(ses.listenerCount('will-download')).toBe(1);
+    const download = { preventDefault: vi.fn() };
+    ses.emit('will-download', download, {}, {});
+    expect(download.preventDefault).toHaveBeenCalledOnce();
   });
 });

@@ -71,15 +71,16 @@ export function hardenWebContents(c: WebContentsLike): void {
   c.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
-export type SessionLike = Pick<Session, 'setPermissionRequestHandler' | 'setPermissionCheckHandler'> & {
+export type SessionLike = Pick<Session, 'setPermissionRequestHandler' | 'setPermissionCheckHandler' | 'on'> & {
   webRequest: Pick<WebRequest, 'onBeforeRequest'>;
 };
 
-/** Every permission is denied, and every request that isn't the app is cancelled. */
+/** Every permission is denied, every request that isn't the app is cancelled, and nothing is downloaded. */
 export function hardenSession(s: SessionLike): void {
   s.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   s.setPermissionCheckHandler(() => false);
   s.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     callback({ cancel: !isAllowedRequestUrl(details.url) });
   });
+  s.on('will-download', (event) => event.preventDefault());
 }
