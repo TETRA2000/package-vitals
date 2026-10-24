@@ -145,6 +145,13 @@ describe('QueueView', () => {
     expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: 3, ecosystem: 'pip' } });
   });
 
+  it("clears a repo filter that isn't in the snapshot", async () => {
+    const overview: Overview = { ...OVERVIEW, repos: [{ id: 3, fullName: 'TETRA2000/c' }] };
+    const { onRepoFilterChange } = setup({ rows: [row(1)] }, overview, { repoFilter: 99 });
+    await rows();
+    expect(onRepoFilterChange).toHaveBeenCalledWith(null);
+  });
+
   it('ignores a stale response that arrives after a newer one', async () => {
     const user = userEvent.setup();
     let resolveFirst!: (d: QueueData) => void;

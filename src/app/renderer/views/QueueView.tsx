@@ -44,6 +44,10 @@ export function QueueView({
     );
   }, [api, snapshotId, severities, repoFilter, ecosystem]);
 
+  useEffect(() => {
+    if (repoFilter !== null && !overview.repos.some((r) => r.id === repoFilter)) onRepoFilterChange(null);
+  }, [repoFilter, overview.repos, onRepoFilterChange]);
+
   function toggle(severity: Severity) {
     setSeverities((current) =>
       current.includes(severity)
