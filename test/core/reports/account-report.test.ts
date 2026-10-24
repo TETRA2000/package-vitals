@@ -108,6 +108,13 @@ describe('renderAccountReport', () => {
     expect(out).not.toContain('<b>');
   });
 
+  it('keeps underscores in not monitored and error repo names literal', () => {
+    const out = renderAccountReport({ ...DATA, monitoring: { checked: 2, monitored: 0, notMonitored: ['TETRA2000/_private_'],
+      errors: [{ repo: 'TETRA2000/__init__', message: 'Not Found (HTTP 404)' }], withOpenAlerts: 0 } });
+    expect(out).toContain('- `TETRA2000/_private_`\n');
+    expect(out).toContain('- `TETRA2000/__init__`: Not Found (HTTP 404)\n');
+  });
+
   it('shows changes and says when there is nothing to list', () => {
     const out = renderAccountReport({ ...DATA, change: { critical: 3, high: -2, medium: 0, low: 1 }, worst: [], treatment: [] });
     expect(out).toContain('| Critical | 522 | +3 |\n| High | 4,439 | -2 |\n| Medium | 4,018 | 0 |\n| Low | 1,028 | +1 |');

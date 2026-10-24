@@ -5,7 +5,7 @@ import {
 } from '../queries/account.js';
 import { getSnapshot, previousCompleteSnapshot } from '../queries/snapshots.js';
 import type { SeverityCounts } from '../types.js';
-import { escapeCell, formatChange, formatCount, formatDate, formatPlural, formatTimestamp } from './markdown.js';
+import { codeSpan, escapeCell, formatChange, formatCount, formatDate, formatPlural, formatTimestamp } from './markdown.js';
 
 export interface AccountReportData {
   ownerLogin: string;
@@ -94,12 +94,12 @@ export function renderAccountReport(d: AccountReportData): string {
     ...(m.notMonitored.length === 0
       ? ['None.']
       : ['Dependabot alerts are turned off for these repos, so they have no data:', '',
-        ...m.notMonitored.map((repo) => `- \`${escapeCell(repo)}\``)]),
+        ...m.notMonitored.map((repo) => `- ${codeSpan(repo)}`)]),
     '',
   ];
 
   if (m.errors.length > 0) {
-    out.push('### Errors', '', ...m.errors.map((e) => `- \`${escapeCell(e.repo)}\`: ${escapeCell(e.message)}`), '');
+    out.push('### Errors', '', ...m.errors.map((e) => `- ${codeSpan(e.repo)}: ${escapeCell(e.message)}`), '');
   }
 
   out.push('## Worst repos', '');

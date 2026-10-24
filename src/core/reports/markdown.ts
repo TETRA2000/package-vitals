@@ -1,17 +1,30 @@
 /**
  * Makes repo-derived text safe for one Markdown table cell or line: HTML
- * comes out as text, links, images, and code spans stay literal, pipes can't
- * split a table row, and line breaks can't end one.
+ * comes out as text, links, images, code spans, and emphasis stay literal,
+ * pipes can't split a table row, and line breaks can't end one.
  */
 export function escapeCell(text: string): string {
   return text
-    .replace(/[\\`[\]]/g, '\\$&')
+    .replace(/[\\`*~[\]]/g, '\\$&')
+    // An underscore run between two letters or digits can't open or close emphasis, so `tolerable_risk` stays readable.
+    .replace(/_+/g, (run: string, i: number, s: string) =>
+      WORD_CHAR.test(s[i - 1] ?? '') && WORD_CHAR.test(s[i + run.length] ?? '') ? run : run.replace(/_/g, '\\_'))
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\|/g, '\\|')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+const WORD_CHAR = /^[\p{L}\p{N}]$/u;
+
+/** Repo-derived text as an inline code span, shown exactly as is apart from line breaks. Not for table cells. */
+export function codeSpan(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const fence = '`'.repeat(Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length)) + 1);
+  const pad = flat.startsWith('`') || flat.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${flat}${pad}${fence}`;
 }
 
 export function formatCount(n: number): string {
