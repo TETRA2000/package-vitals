@@ -16,13 +16,27 @@ import { hardenSession, hardenWebContents, isAppUrl, webPreferences } from './se
 
 const home = resolveDataHome(process.env, process.platform, homedir());
 let db: Db | undefined;
+let mainWindow: BrowserWindow | undefined;
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true } }]);
 app.enableSandbox();
+// Before the lock: Electron keys the single-instance lock on the userData folder, so this makes it per data home.
 app.setPath('userData', home);
 app.on('web-contents-created', (_event, contents) => hardenWebContents(contents));
 
+// One app per data home, so two app processes can't run two Checkups at once. A second launch quits before it
+// opens anything, and the first comes to the front.
+const isFirstInstance = app.requestSingleInstanceLock();
+if (!isFirstInstance) app.quit();
+app.on('second-instance', () => {
+  if (mainWindow === undefined || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 app.whenReady().then(() => {
+  if (!isFirstInstance) return;
   hardenSession(session.defaultSession);
   registerAppProtocol(protocol, path.join(import.meta.dirname, '../renderer'));
 
@@ -36,6 +50,7 @@ app.whenReady().then(() => {
     show: false,
     webPreferences: webPreferences(path.join(import.meta.dirname, '../preload/preload.cjs')),
   });
+  mainWindow = win;
   const controller = createCheckupController({
     run: (onProgress) => runAccountCheckup(
       { db: database, exec: execFileText, now: () => new Date(), onProgress },
