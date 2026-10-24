@@ -62,6 +62,22 @@ describe('GitHubClient', () => {
     expect(sleep).toHaveBeenCalledWith(3000);
   });
 
+  it('waits a minute for a secondary rate limit that has no headers, then retries', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const f = fakeFetch({ '/user': [
+      { status: 403, body: { message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' } },
+      { body: { login: 'TETRA2000' } }] });
+    expect(await new GitHubClient({ token: TOKEN, fetch: f, sleep }).getJson('/user')).toEqual({ login: 'TETRA2000' });
+    expect(sleep).toHaveBeenCalledWith(60_000);
+  });
+
+  it('waits a minute on a 429 that has no headers', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const f = fakeFetch({ '/user': [{ status: 429, body: { message: 'Too Many Requests' } }, { body: { login: 'TETRA2000' } }] });
+    expect(await new GitHubClient({ token: TOKEN, fetch: f, sleep }).getJson('/user')).toEqual({ login: 'TETRA2000' });
+    expect(sleep).toHaveBeenCalledWith(60_000);
+  });
+
   it('does not retry a permission 403', async () => {
     // Review Focus 2: a 403 that is not a rate limit is an error, not a wait.
     const sleep = vi.fn(async (_ms: number) => {});

@@ -1,10 +1,11 @@
 /**
  * Makes repo-derived text safe for one Markdown table cell or line: HTML
- * comes out as text, pipes can't split a table row, and line breaks can't
- * end one.
+ * comes out as text, links, images, and code spans stay literal, pipes can't
+ * split a table row, and line breaks can't end one.
  */
 export function escapeCell(text: string): string {
   return text
+    .replace(/[\\`[\]]/g, '\\$&')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

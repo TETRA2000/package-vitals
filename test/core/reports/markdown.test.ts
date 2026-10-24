@@ -10,6 +10,13 @@ describe('escapeCell', () => {
   });
   it('turns HTML into text', () => expect(escapeCell('<img src=x onerror=alert(1)>')).toBe('&lt;img src=x onerror=alert(1)&gt;'));
   it('escapes ampersands', () => expect(escapeCell('A & B')).toBe('A &amp; B'));
+  it('neutralises Markdown links, images, and code spans', () => {
+    expect(escapeCell('![x](https://evil.example/p.png) [click](javascript:alert(1)) `code`'))
+      .toBe('!\\[x\\](https://evil.example/p.png) \\[click\\](javascript:alert(1)) \\`code\\`');
+  });
+  it('escapes backslashes so they cannot cancel an escape', () => {
+    expect(escapeCell('a\\|b \\[x](u)')).toBe('a\\\\\\|b \\\\\\[x\\](u)');
+  });
 });
 
 describe('formatting', () => {

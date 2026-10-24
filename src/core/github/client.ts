@@ -84,14 +84,14 @@ export class GitHubClient {
         ? body.message
         : response.statusText || 'Request failed';
       const error = new GitHubApiError(response.status, message, url);
-      const wait = this.#rateLimitWait(response);
+      const wait = this.#rateLimitWait(response, message);
       if (wait === null || attempt >= this.#maxRetries) throw error;
       await this.#sleep(wait);
     }
   }
 
   /** How long to wait before retrying a rate-limited response, or null if it isn't one. */
-  #rateLimitWait(response: Response): number | null {
+  #rateLimitWait(response: Response, message: string): number | null {
     if (response.status !== 403 && response.status !== 429) return null;
     const retryAfter = Number(response.headers.get('retry-after') ?? NaN);
     if (Number.isFinite(retryAfter)) return Math.max(0, retryAfter * 1000);
@@ -99,6 +99,8 @@ export class GitHubClient {
     if (response.headers.get('x-ratelimit-remaining') === '0' && Number.isFinite(reset)) {
       return Math.max(0, reset * 1000 - this.#now() + 1000);
     }
+    // A secondary rate limit can arrive without either header; GitHub says to wait at least a minute.
+    if (response.status === 429 || /rate limit/i.test(message)) return 60_000;
     return null;
   }
 }
