@@ -34,11 +34,17 @@ describe('action handlers', () => {
     const keys = [
       { snapshotId, repoId: id, number: 99 },
       { snapshotId, repoId: 999, number: 1 },
-      { snapshotId: running, repoId: repoId('TETRA2000/b'), number: 2 },
+      { snapshotId: running, repoId: repoId('TETRA2000/b'), number: 1 },
       { snapshotId: 999, repoId: id, number: 1 },
       { snapshotId, repoId: id },
       'nope',
     ];
+    const notComplete = { snapshotId: running, repoId: repoId('TETRA2000/b'), number: 1 };
+    for (const call of [handlers.openFindingOnGitHub, handlers.copyFindingMarkdown]) {
+      const err = await call(notComplete).then(() => null, (e: unknown) => e);
+      expect(err).toBeInstanceOf(IpcInputError);
+      expect((err as Error).message).toBe(`Snapshot ${running} is not complete.`);
+    }
     for (const key of keys) {
       for (const call of [handlers.openFindingOnGitHub, handlers.copyFindingMarkdown]) {
         const err = await call(key).then(() => null, (e: unknown) => e);
