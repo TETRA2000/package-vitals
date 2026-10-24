@@ -7,3 +7,32 @@ body {
   margin: 0;
   padding: 24px;
 }
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+nav {
+  display: flex;
+  gap: 8px;
+}
+
+nav button[aria-current='page'] {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.snapshot {
+  margin: 0;
+  opacity: 0.75;
+}
+
+[role='alert'] {
+  padding: 8px 12px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+}
