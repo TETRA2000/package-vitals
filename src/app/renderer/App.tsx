@@ -79,7 +79,7 @@ export function App({ api }: { api: VitalsApi }) {
             </button>
           ))}
         </nav>
-        <CheckupButton api={api} running={overview?.checkupRunning ?? false} onDone={reload} />
+        <CheckupButton api={api} running={overview?.checkupRunning ?? false} onSettled={reload} />
         {snapshot && (
           <p className="snapshot">{`Snapshot ${snapshot.id} · ${snapshot.ownerLogin} · completed ${formatUtc(snapshot.finishedAt)}`}</p>
         )}

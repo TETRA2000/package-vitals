@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../../src/app/renderer/App.js';
-import type { Overview } from '../../../src/app/shared/api.js';
+import type { CheckupResult, Overview } from '../../../src/app/shared/api.js';
 import { fakeApi, OVERVIEW } from './fake-api.js';
 
 describe('App', () => {
@@ -35,6 +35,25 @@ describe('App', () => {
       window.dispatchEvent(new Event('focus'));
     });
     expect(api.getOverview).toHaveBeenCalledTimes(2);
+  });
+
+  it('enables the button again when a Checkup fails after a mid-run refocus', async () => {
+    const user = userEvent.setup();
+    let fail: (r: CheckupResult) => void = () => {};
+    const getOverview = vi.fn<() => Promise<Overview>>().mockResolvedValue(OVERVIEW);
+    const api = fakeApi({
+      getOverview,
+      startCheckup: vi.fn(() => new Promise<CheckupResult>((res) => { fail = res; })),
+    });
+    render(<App api={api} />);
+    await screen.findByText(/Snapshot 7/);
+    await user.click(screen.getByRole('button', { name: 'Run Checkup' }));
+    getOverview.mockResolvedValue({ ...OVERVIEW, checkupRunning: true });
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    getOverview.mockResolvedValue(OVERVIEW);
+    await act(async () => fail({ ok: false, message: 'Server Error (HTTP 500)' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Server Error (HTTP 500)');
+    expect(screen.getByRole('button', { name: 'Run Checkup' })).toBeEnabled();
   });
 
   it("shows an error when the overview can't load", async () => {

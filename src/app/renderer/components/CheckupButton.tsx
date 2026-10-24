@@ -3,7 +3,7 @@ import { checkupWarning, formatCheckupSummary } from '../../../core/checkup/form
 import type { CheckupProgress, VitalsApi } from '../../shared/api.js';
 import { ipcErrorMessage } from '../format';
 
-export function CheckupButton({ api, running, onDone }: { api: VitalsApi; running: boolean; onDone: () => void }) {
+export function CheckupButton({ api, running, onSettled }: { api: VitalsApi; running: boolean; onSettled: () => void }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<CheckupProgress | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
@@ -23,7 +23,6 @@ export function CheckupButton({ api, running, onDone }: { api: VitalsApi; runnin
       if (result.ok) {
         setSummary(formatCheckupSummary(result.summary));
         setWarning(checkupWarning(result.summary));
-        onDone();
       } else {
         setError(result.message);
       }
@@ -31,6 +30,8 @@ export function CheckupButton({ api, running, onDone }: { api: VitalsApi; runnin
       setError(ipcErrorMessage(err));
     } finally {
       setBusy(false);
+      // Reload after success or failure, so a `running` flag read mid-run can't outlive the run.
+      onSettled();
     }
   }
 
