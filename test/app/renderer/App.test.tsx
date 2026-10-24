@@ -1,8 +1,9 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../../src/app/renderer/App.js';
-import type { CheckupResult, Overview } from '../../../src/app/shared/api.js';
+import type { CheckupResult, Overview, QueueData } from '../../../src/app/shared/api.js';
+import type { FindingFilter, FindingRow, RepoCard } from '../../../src/core/types.js';
 import { fakeApi, OVERVIEW } from './fake-api.js';
 
 describe('App', () => {
@@ -54,6 +55,67 @@ describe('App', () => {
     await act(async () => fail({ ok: false, message: 'Server Error (HTTP 500)' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Server Error (HTTP 500)');
     expect(screen.getByRole('button', { name: 'Run Checkup' })).toBeEnabled();
+  });
+
+  describe('the queue filter', () => {
+    const overview: Overview = {
+      ...OVERVIEW,
+      repos: [{ id: 3, fullName: 'TETRA2000/c' }, { id: 4, fullName: 'TETRA2000/highs' }],
+      ecosystems: ['npm', 'pip'],
+    };
+    const highsCard: RepoCard = {
+      repoId: 4, fullName: 'TETRA2000/highs', status: 'ok', error: null, critical: 0, high: 2, open: 2, oldestOpenAlert: '2026-04-24T00:00:00.000Z',
+    };
+    function highRow(n: number): FindingRow {
+      return {
+        snapshotId: 7, repoId: 4, number: n, fullName: 'TETRA2000/highs', severity: 'high', ecosystem: 'npm', packageName: `pkg-${n}`,
+        ghsaId: `GHSA-${n}`, summary: `Summary ${n}`, manifestPath: 'package.json', createdAt: '2026-04-24T00:00:00.000Z', triage: 'not_triaged',
+      };
+    }
+    function setup() {
+      // Repo 4 has only high alerts; the queue shows them only when high is ticked.
+      const listFindings = vi.fn(async ({ filter }: { snapshotId: number; filter: FindingFilter }): Promise<QueueData> => ({
+        rows: filter.repoId === 4 && filter.severities.includes('high') ? [highRow(1), highRow(2)] : [],
+        counts: { critical: 0, notTriaged: 0, devOnly: null, reachable: null, uncertain: null },
+      }));
+      const api = fakeApi({ getOverview: vi.fn(async () => overview), listFindings, listRepoCards: vi.fn(async () => [highsCard]) });
+      render(<App api={api} />);
+      return { listFindings };
+    }
+    const nav = (name: string) => within(screen.getByRole('navigation', { name: 'Views' })).getByRole('button', { name });
+
+    it('opens a repo card in the queue with every severity ticked', async () => {
+      const user = userEvent.setup();
+      const { listFindings } = setup();
+      await screen.findByText(/Snapshot 7/);
+      expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: null, ecosystem: null } });
+      // An ecosystem filter would hide the repo's alerts too, so opening a card clears it.
+      await user.selectOptions(await screen.findByRole('combobox', { name: 'Ecosystem' }), 'pip');
+      await user.click(nav('Repos'));
+      await user.click(await screen.findByRole('button', { name: /TETRA2000\/highs/ }));
+      const list = await screen.findByRole('listbox', { name: 'Findings' });
+      expect(listFindings).toHaveBeenLastCalledWith({
+        snapshotId: 7,
+        filter: { severities: ['critical', 'high', 'medium', 'low'], repoId: 4, ecosystem: null },
+      });
+      expect(within(list).getAllByRole('option')).toHaveLength(2);
+      for (const name of ['Critical', 'High', 'Medium', 'Low']) expect(screen.getByRole('checkbox', { name })).toBeChecked();
+    });
+
+    it('keeps the chosen severities across view switches', async () => {
+      const user = userEvent.setup();
+      const { listFindings } = setup();
+      await screen.findByText(/Snapshot 7/);
+      await user.click(await screen.findByRole('checkbox', { name: 'High' }));
+      await user.click(screen.getByRole('checkbox', { name: 'Critical' }));
+      await user.click(nav('Repos'));
+      await screen.findByRole('heading', { name: 'Repos' });
+      await user.click(nav('Queue'));
+      expect(await screen.findByRole('checkbox', { name: 'High' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Critical' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'High' })).toBeDisabled();
+      expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['high'], repoId: null, ecosystem: null } });
+    });
   });
 
   it("shows an error when the overview can't load", async () => {

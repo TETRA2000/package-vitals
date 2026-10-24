@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { FindingFilter } from '../../core/types.js';
 import type { Overview, VitalsApi } from '../shared/api.js';
 import { CheckupButton } from './components/CheckupButton';
 import { formatUtc, ipcErrorMessage } from './format';
-import { QueueView } from './views/QueueView';
+import { DEFAULT_QUEUE_FILTER, QueueView, repoQueueFilter } from './views/QueueView';
 import { RepoCardsView } from './views/RepoCardsView';
 import { ReportsView } from './views/ReportsView';
 import { TreatmentPlanView } from './views/TreatmentPlanView';
@@ -20,7 +21,7 @@ export function App({ api }: { api: VitalsApi }) {
   const [view, setView] = useState<View>('queue');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [repoFilter, setRepoFilter] = useState<number | null>(null);
+  const [queueFilter, setQueueFilter] = useState<FindingFilter>(DEFAULT_QUEUE_FILTER);
 
   const latestRequest = useRef(0);
 
@@ -51,13 +52,13 @@ export function App({ api }: { api: VitalsApi }) {
     const props = { api, overview: o, snapshotId };
     switch (view) {
       case 'queue':
-        return <QueueView {...props} repoFilter={repoFilter} onRepoFilterChange={setRepoFilter} />;
+        return <QueueView {...props} filter={queueFilter} onFilterChange={setQueueFilter} />;
       case 'repos':
         return (
           <RepoCardsView
             {...props}
             onOpenRepo={(repoId) => {
-              setRepoFilter(repoId);
+              setQueueFilter(repoQueueFilter(repoId));
               setView('queue');
             }}
           />

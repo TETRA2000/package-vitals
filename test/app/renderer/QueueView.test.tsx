@@ -1,9 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { QueueView } from '../../../src/app/renderer/views/QueueView.js';
-import type { Overview, QueueCounts, QueueData } from '../../../src/app/shared/api.js';
-import type { FindingRow } from '../../../src/core/types.js';
+import { DEFAULT_QUEUE_FILTER, QueueView } from '../../../src/app/renderer/views/QueueView.js';
+import type { Overview, QueueCounts, QueueData, VitalsApi } from '../../../src/app/shared/api.js';
+import type { FindingFilter, FindingRow } from '../../../src/core/types.js';
 import { fakeApi, OVERVIEW } from './fake-api.js';
 
 const COUNTS: QueueCounts = { critical: 1, notTriaged: 1, devOnly: null, reachable: null, uncertain: null };
@@ -26,14 +27,20 @@ function row(n: number, over: Partial<FindingRow> = {}): FindingRow {
   };
 }
 
-function setup(data: Partial<QueueData> = {}, overview: Overview = OVERVIEW, extra: { repoFilter?: number | null; onRepoFilterChange?: (id: number | null) => void } = {}) {
+/** The queue's filter lives in App; this holds it the same way. */
+function Harness({ api, overview, initial }: { api: VitalsApi; overview: Overview; initial: FindingFilter }) {
+  const [filter, setFilter] = useState(initial);
+  return <QueueView api={api} overview={overview} snapshotId={7} filter={filter} onFilterChange={setFilter} />;
+}
+
+function renderQueue(api: VitalsApi, overview: Overview = OVERVIEW, initial: FindingFilter = DEFAULT_QUEUE_FILTER) {
+  return render(<Harness api={api} overview={overview} initial={initial} />);
+}
+
+function setup(data: Partial<QueueData> = {}, overview: Overview = OVERVIEW, initial: FindingFilter = DEFAULT_QUEUE_FILTER) {
   const listFindings = vi.fn(async () => ({ rows: [], counts: COUNTS, ...data }));
-  const api = fakeApi({ listFindings });
-  const onRepoFilterChange = extra.onRepoFilterChange ?? vi.fn();
-  const utils = render(
-    <QueueView api={api} overview={overview} snapshotId={7} repoFilter={extra.repoFilter ?? null} onRepoFilterChange={onRepoFilterChange} />,
-  );
-  return { listFindings, onRepoFilterChange, ...utils };
+  const utils = renderQueue(fakeApi({ listFindings }), overview, initial);
+  return { listFindings, ...utils };
 }
 
 /** The finding rows (the selects' <option>s share the role, so scope to the list). */
@@ -137,32 +144,32 @@ describe('QueueView', () => {
   });
 
   it('shows a load failure in an alert', async () => {
-    const api = fakeApi({ listFindings: vi.fn(async () => { throw new Error("Error invoking remote method 'x': boom"); }) });
-    render(<QueueView api={api} overview={OVERVIEW} snapshotId={7} repoFilter={null} onRepoFilterChange={vi.fn()} />);
+    renderQueue(fakeApi({ listFindings: vi.fn(async () => { throw new Error("Error invoking remote method 'x': boom"); }) }));
     expect(await screen.findByRole('alert')).toHaveTextContent('boom');
   });
 
-  it('filters by the repo it is given', async () => {
+  it('filters by the repo and ecosystem it is given', async () => {
     const user = userEvent.setup();
     const overview: Overview = { ...OVERVIEW, repos: [{ id: 3, fullName: 'TETRA2000/c' }, { id: 4, fullName: 'TETRA2000/d' }], ecosystems: ['npm', 'pip'] };
-    const { listFindings, onRepoFilterChange } = setup({ rows: [row(1)] }, overview, { repoFilter: 3 });
+    const { listFindings } = setup({ rows: [row(1)] }, overview, { ...DEFAULT_QUEUE_FILTER, repoId: 3 });
     await rows();
     expect(listFindings).toHaveBeenCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: 3, ecosystem: null } });
     const select = screen.getByRole('combobox', { name: 'Repo' });
     expect(select).toHaveValue('3');
     await user.selectOptions(select, 'TETRA2000/d');
-    expect(onRepoFilterChange).toHaveBeenCalledWith(4);
-    await user.selectOptions(select, 'All repos');
-    expect(onRepoFilterChange).toHaveBeenLastCalledWith(null);
+    expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: 4, ecosystem: null } });
     await user.selectOptions(screen.getByRole('combobox', { name: 'Ecosystem' }), 'pip');
-    expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: 3, ecosystem: 'pip' } });
+    expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: 4, ecosystem: 'pip' } });
+    await user.selectOptions(select, 'All repos');
+    expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: null, ecosystem: 'pip' } });
   });
 
   it("clears a repo filter that isn't in the snapshot", async () => {
     const overview: Overview = { ...OVERVIEW, repos: [{ id: 3, fullName: 'TETRA2000/c' }] };
-    const { onRepoFilterChange } = setup({ rows: [row(1)] }, overview, { repoFilter: 99 });
-    await rows();
-    expect(onRepoFilterChange).toHaveBeenCalledWith(null);
+    const { listFindings } = setup({ rows: [row(1)] }, overview, { ...DEFAULT_QUEUE_FILTER, repoId: 99 });
+    await waitFor(() =>
+      expect(listFindings).toHaveBeenLastCalledWith({ snapshotId: 7, filter: { severities: ['critical'], repoId: null, ecosystem: null } }));
+    expect(screen.getByRole('combobox', { name: 'Repo' })).toHaveValue('');
   });
 
   it('ignores a stale response that arrives after a newer one', async () => {
@@ -172,7 +179,7 @@ describe('QueueView', () => {
     const listFindings = vi.fn()
       .mockReturnValueOnce(first)
       .mockResolvedValueOnce({ rows: [row(2)], counts: COUNTS });
-    render(<QueueView api={fakeApi({ listFindings })} overview={OVERVIEW} snapshotId={7} repoFilter={null} onRepoFilterChange={vi.fn()} />);
+    renderQueue(fakeApi({ listFindings }));
     await user.click(screen.getByRole('checkbox', { name: 'High' }));
     expect(await screen.findByText(/pkg-2/)).toBeInTheDocument();
     const { act } = await import('@testing-library/react');
@@ -185,7 +192,7 @@ describe('QueueView', () => {
     const user = userEvent.setup();
     const getFinding = vi.fn(async () => null);
     const listFindings = vi.fn(async () => ({ rows: [row(1), row(2), row(3)], counts: COUNTS }));
-    render(<QueueView api={fakeApi({ listFindings, getFinding })} overview={OVERVIEW} snapshotId={7} repoFilter={null} onRepoFilterChange={vi.fn()} />);
+    renderQueue(fakeApi({ listFindings, getFinding }));
     const items = await rows();
     const key = (n: number) => ({ snapshotId: 7, repoId: 1, number: n });
     const selected = () => items.map((r) => r.getAttribute('aria-selected'));

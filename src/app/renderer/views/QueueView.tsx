@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { QueueData } from '../../shared/api.js';
-import type { Severity } from '../../../core/types.js';
+import type { FindingFilter, Severity } from '../../../core/types.js';
 import { FindingList } from '../components/FindingList';
 import { Notices } from '../components/Notices';
 import { SidePanel } from '../components/SidePanel';
@@ -15,15 +15,23 @@ const SEVERITIES: { value: Severity; label: string }[] = [
   { value: 'low', label: 'Low' },
 ];
 
+/** The queue opens on critical findings only. */
+export const DEFAULT_QUEUE_FILTER: FindingFilter = { severities: ['critical'], repoId: null, ecosystem: null };
+
+/** Every open alert of one repo, so a card with no criticals still opens to its alerts. */
+export function repoQueueFilter(repoId: number): FindingFilter {
+  return { severities: SEVERITIES.map((s) => s.value), repoId, ecosystem: null };
+}
+
+/** The filter is the App's state, so it survives switching views. */
 export function QueueView({
   api,
   overview,
   snapshotId,
-  repoFilter,
-  onRepoFilterChange,
-}: ViewProps & { repoFilter: number | null; onRepoFilterChange: (repoId: number | null) => void }) {
-  const [severities, setSeverities] = useState<Severity[]>(['critical']);
-  const [ecosystem, setEcosystem] = useState<string | null>(null);
+  filter,
+  onFilterChange,
+}: ViewProps & { filter: FindingFilter; onFilterChange: Dispatch<SetStateAction<FindingFilter>> }) {
+  const { severities, repoId: repoFilter, ecosystem } = filter;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [data, setData] = useState<QueueData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,17 +54,15 @@ export function QueueView({
   }, [api, snapshotId, severities, repoFilter, ecosystem]);
 
   useEffect(() => {
-    if (repoFilter !== null && !overview.repos.some((r) => r.id === repoFilter)) onRepoFilterChange(null);
-  }, [repoFilter, overview.repos, onRepoFilterChange]);
+    if (repoFilter !== null && !overview.repos.some((r) => r.id === repoFilter)) onFilterChange((f) => ({ ...f, repoId: null }));
+  }, [repoFilter, overview.repos, onFilterChange]);
 
   function toggle(severity: Severity) {
-    setSeverities((current) =>
-      current.includes(severity)
-        ? current.length > 1
-          ? current.filter((s) => s !== severity)
-          : current
-        : SEVERITIES.map((s) => s.value).filter((s) => s === severity || current.includes(s)),
-    );
+    onFilterChange((f) => {
+      const current = f.severities;
+      if (current.includes(severity)) return current.length > 1 ? { ...f, severities: current.filter((s) => s !== severity) } : f;
+      return { ...f, severities: SEVERITIES.map((s) => s.value).filter((s) => s === severity || current.includes(s)) };
+    });
   }
 
   const now = overview.snapshot?.finishedAt ?? '';
@@ -83,7 +89,13 @@ export function QueueView({
         </fieldset>
         <label>
           Repo
-          <select value={repoFilter === null ? '' : String(repoFilter)} onChange={(e) => onRepoFilterChange(e.target.value === '' ? null : Number(e.target.value))}>
+          <select
+            value={repoFilter === null ? '' : String(repoFilter)}
+            onChange={(e) => {
+              const repoId = e.target.value === '' ? null : Number(e.target.value);
+              onFilterChange((f) => ({ ...f, repoId }));
+            }}
+          >
             <option value="">All repos</option>
             {overview.repos.map((r) => (
               <option key={r.id} value={String(r.id)}>
@@ -94,7 +106,13 @@ export function QueueView({
         </label>
         <label>
           Ecosystem
-          <select value={ecosystem ?? ''} onChange={(e) => setEcosystem(e.target.value === '' ? null : e.target.value)}>
+          <select
+            value={ecosystem ?? ''}
+            onChange={(e) => {
+              const value = e.target.value === '' ? null : e.target.value;
+              onFilterChange((f) => ({ ...f, ecosystem: value }));
+            }}
+          >
             <option value="">All ecosystems</option>
             {overview.ecosystems.map((name) => (
               <option key={name} value={name}>
