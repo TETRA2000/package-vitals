@@ -1,10 +1,11 @@
 import { transaction, type Db } from '../db/database.js';
-import type { AlertsResult, Owner, RepoInfo, SbomResult } from '../types.js';
+import type { AlertsResult, CheckupScope, Owner, RepoInfo, SbomResult } from '../types.js';
 
 /** Starts a snapshot in the `running` state and returns its id. */
-export function createSnapshot(db: Db, owner: Owner, startedAt: string): number {
-  const result = db.prepare(`INSERT INTO snapshots (owner_kind, owner_login, started_at, status)
-    VALUES (?, ?, ?, 'running')`).run(owner.kind, owner.login, startedAt);
+export function createSnapshot(db: Db, owner: Owner, startedAt: string, scope: CheckupScope): number {
+  const result = db.prepare(`INSERT INTO snapshots (owner_kind, owner_login, include_forks, include_archived, started_at, status)
+    VALUES (?, ?, ?, ?, ?, 'running')`)
+    .run(owner.kind, owner.login, Number(scope.includeForks), Number(scope.includeArchived), startedAt);
   return Number(result.lastInsertRowid);
 }
 

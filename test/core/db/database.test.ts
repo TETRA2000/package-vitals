@@ -7,8 +7,8 @@ import { Worker } from 'node:worker_threads';
 import { openDatabase, transaction, type Db } from '../../../src/core/db/database.js';
 import { SCHEMA_VERSION } from '../../../src/core/db/schema.js';
 
-const INSERT_SNAPSHOT = `INSERT INTO snapshots (owner_kind, owner_login, started_at, status)
-  VALUES ('user', 'TETRA2000', '2026-10-24T00:00:00.000Z', 'running')`;
+const INSERT_SNAPSHOT = `INSERT INTO snapshots (owner_kind, owner_login, include_forks, include_archived, started_at, status)
+  VALUES ('user', 'TETRA2000', 0, 0, '2026-10-24T00:00:00.000Z', 'running')`;
 
 const open: Db[] = [];
 const dirs: string[] = [];

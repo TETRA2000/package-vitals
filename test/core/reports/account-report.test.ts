@@ -116,10 +116,26 @@ describe('renderAccountReport', () => {
   });
 
   it('shows changes and says when there is nothing to list', () => {
-    const out = renderAccountReport({ ...DATA, change: { critical: 3, high: -2, medium: 0, low: 1 }, worst: [], treatment: [] });
-    expect(out).toContain('| Critical | 522 | +3 |\n| High | 4,439 | -2 |\n| Medium | 4,018 | 0 |\n| Low | 1,028 | +1 |');
+    const out = renderAccountReport({ ...DATA, worst: [], treatment: [],
+      change: { counts: { critical: 3, high: -2, medium: 0, low: 1 }, comparedRepos: 355, leftOutRepos: 0 } });
+    expect(out).toContain('| Critical | 522 | +3 |\n| High | 4,439 | -2 |\n| Medium | 4,018 | 0 |\n| Low | 1,028 | +1 |\n\n## Alert states');
     expect(out).toContain('## Worst repos\n\nNo repos have open alerts.\n');
     expect(out).toContain('## Treatment plan\n\nNo open critical alerts.\n');
+  });
+
+  it('says which repos the change leaves out', () => {
+    const out = renderAccountReport({ ...DATA,
+      change: { counts: { critical: 3, high: 0, medium: 0, low: 0 }, comparedRepos: 1, leftOutRepos: 2 } });
+    expect(out).toContain('| Low | 1,028 | 0 |\n\nChange covers only the 1 repo read in both snapshots; '
+      + '2 repos read in only one are left out.\n\n## Alert states');
+  });
+
+  it('says in the headline when repos could not be read', () => {
+    const errors = (n: number) => Array.from({ length: n }, (_, i) => ({ repo: `TETRA2000/e${i}`, message: 'Bad Gateway (HTTP 502)' }));
+    expect(renderAccountReport({ ...DATA, monitoring: { ...DATA.monitoring, errors: errors(1) } }))
+      .toContain("across 126 repos. 1 repo couldn't be read, so its alerts aren't counted. Triage has not run yet");
+    expect(renderAccountReport({ ...DATA, monitoring: { ...DATA.monitoring, errors: errors(2) } }))
+      .toContain("across 126 repos. 2 repos couldn't be read, so their alerts aren't counted. Triage has not run yet");
   });
 
   it('escapes repo-derived text in tables', () => {
@@ -140,11 +156,30 @@ describe('buildAccountReportData', () => {
     seedSnapshot(db, { status: 'failed', repos: [{ name: 'a', alerts: crit(9) }] });
     const id = seedSnapshot(db, { finishedAt: '2026-10-24T05:07:09.000Z', repos: [{ name: 'a', alerts: crit(5) }, { name: 'b', alertsStatus: 'not_monitored' }] });
     const data = buildAccountReportData(db, id, new Date('2026-10-24T06:00:00Z'));
-    expect(data.change?.critical).toBe(3);
+    expect(data.change).toEqual({ counts: { critical: 3, high: 0, medium: 0, low: 0 }, comparedRepos: 1, leftOutRepos: 0 });
     expect(data).toMatchObject({ ownerLogin: 'TETRA2000', snapshotId: 3, finishedAt: '2026-10-24T05:07:09.000Z',
       monitoring: { checked: 2, notMonitored: ['TETRA2000/b'] } });
     expect(data.ages).toHaveLength(5);
     expect(renderAccountReport(data)).toContain('| Critical | 5 | +3 |');
+  });
+
+  it('counts the change only over repos read in both snapshots', () => {
+    db = openDatabase(':memory:');
+    const crit = (n: number) => Array.from({ length: n }, () => ({ severity: 'critical' as const }));
+    seedSnapshot(db, { repos: [{ name: 'a', alerts: crit(2) }, { name: 'b', alerts: crit(30) },
+      { name: 'c', alertsStatus: 'not_monitored' }] });
+    const id = seedSnapshot(db, { repos: [{ name: 'a', alerts: crit(5) },
+      { name: 'b', alertsStatus: 'error', alertsError: 'Bad Gateway (HTTP 502)' }, { name: 'c', alerts: crit(1) }] });
+    const data = buildAccountReportData(db, id, new Date('2026-10-24T06:00:00Z'));
+    expect(data.change).toEqual({ counts: { critical: 3, high: 0, medium: 0, low: 0 }, comparedRepos: 1, leftOutRepos: 2 });
+    expect(renderAccountReport(data)).toContain('| Critical | 6 | +3 |');
+  });
+
+  it('has no change when the previous snapshot had a different scope', () => {
+    db = openDatabase(':memory:');
+    seedSnapshot(db, { includeArchived: true, repos: [{ name: 'a', alerts: [{ severity: 'critical' }] }] });
+    const id = seedSnapshot(db, { repos: [{ name: 'a', alerts: [{ severity: 'critical' }] }] });
+    expect(buildAccountReportData(db, id, new Date()).change).toBeNull();
   });
 
   it('has no change for the first snapshot', () => {

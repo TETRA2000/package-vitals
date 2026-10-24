@@ -12,6 +12,34 @@ export function openSeverityCounts(db: Db, snapshotId: number, repoId?: number):
   return counts;
 }
 
+export interface SeverityChange {
+  counts: SeverityCounts;
+  /** Repos whose alerts were read in both snapshots; only these are counted. */
+  comparedRepos: number;
+  /** Repos whose alerts were read in only one of the two snapshots. */
+  leftOutRepos: number;
+}
+
+/**
+ * Open alerts in `snapshotId` minus those in `previousId`, over only the repos
+ * read in both, so a repo that errored, lost monitoring, or is new can't pass
+ * for alerts being fixed or found.
+ */
+export function openSeverityChange(db: Db, snapshotId: number, previousId: number): SeverityChange {
+  const repos = db.prepare(`SELECT repo_id AS repoId,
+      max(snapshot_id = ? AND alerts_status = 'ok') AS now, max(snapshot_id = ? AND alerts_status = 'ok') AS before
+    FROM snapshot_repos WHERE snapshot_id IN (?, ?) GROUP BY repo_id`)
+    .all(snapshotId, previousId, snapshotId, previousId) as { repoId: number; now: number; before: number }[];
+  const compared = repos.filter((r) => r.now === 1 && r.before === 1).map((r) => r.repoId);
+  const rows = db.prepare(`SELECT snapshot_id AS snapshotId, severity, count(*) AS n FROM alerts
+    WHERE snapshot_id IN (?, ?) AND state = 'open' AND repo_id IN (SELECT value FROM json_each(?))
+    GROUP BY snapshot_id, severity`)
+    .all(snapshotId, previousId, JSON.stringify(compared)) as { snapshotId: number; severity: keyof SeverityCounts; n: number }[];
+  const counts: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const r of rows) counts[r.severity] += r.snapshotId === snapshotId ? r.n : -r.n;
+  return { counts, comparedRepos: compared.length, leftOutRepos: repos.filter((r) => r.now !== r.before).length };
+}
+
 export interface StateCounts {
   open: number;
   dismissed: number;

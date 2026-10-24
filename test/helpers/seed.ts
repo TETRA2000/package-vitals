@@ -13,6 +13,8 @@ export interface SeedRepo {
 
 export interface SeedSpec {
   owner?: string;
+  includeForks?: boolean;
+  includeArchived?: boolean;
   status?: 'running' | 'complete' | 'failed';
   finishedAt?: string;
   repos: SeedRepo[];
@@ -21,7 +23,8 @@ export interface SeedSpec {
 /** Seeds one snapshot through the store functions and returns its id. */
 export function seedSnapshot(db: Db, spec: SeedSpec): number {
   const owner = spec.owner ?? 'TETRA2000';
-  const snapshotId = createSnapshot(db, { kind: 'user', login: owner }, '2026-10-24T00:00:00.000Z');
+  const snapshotId = createSnapshot(db, { kind: 'user', login: owner }, '2026-10-24T00:00:00.000Z',
+    { includeForks: spec.includeForks ?? false, includeArchived: spec.includeArchived ?? false });
   let number = 0;
   for (const repo of spec.repos) {
     const repoId = upsertRepo(db, { fullName: `${owner}/${repo.name}`, isPrivate: false, isFork: false,

@@ -1,6 +1,12 @@
 /** A GitHub user or org whose repos are checked. */
 export type Owner = { kind: 'user' | 'org'; login: string };
 
+/** Which repos a Checkup covers. Snapshots are only compared with snapshots of the same scope. */
+export interface CheckupScope {
+  includeForks: boolean;
+  includeArchived: boolean;
+}
+
 export interface RepoInfo {
   fullName: string;
   isPrivate: boolean;

@@ -5,7 +5,7 @@ import { fetchRepoAlerts } from '../github/alerts.js';
 import { fetchRepoSbom } from '../github/sbom.js';
 import { mapLimit } from '../concurrency.js';
 import { createSnapshot, finishSnapshot, recordRepoResult, upsertRepo } from './store.js';
-import type { AlertsResult, Owner, SbomResult, SeverityCounts } from '../types.js';
+import type { AlertsResult, CheckupScope, Owner, SbomResult, SeverityCounts } from '../types.js';
 
 export interface CheckupDeps {
   db: Db;
@@ -14,10 +14,8 @@ export interface CheckupDeps {
   onProgress?: (p: { done: number; total: number; repo: string }) => void;
 }
 
-export interface CheckupOptions {
+export interface CheckupOptions extends CheckupScope {
   owner: Owner;
-  includeForks: boolean;
-  includeArchived: boolean;
   concurrency: number;
 }
 
@@ -36,7 +34,8 @@ export interface CheckupSummary {
  */
 export async function runCheckup(deps: CheckupDeps, opts: CheckupOptions): Promise<CheckupSummary> {
   const { db, client, now } = deps;
-  const snapshotId = createSnapshot(db, opts.owner, now().toISOString());
+  const snapshotId = createSnapshot(db, opts.owner, now().toISOString(),
+    { includeForks: opts.includeForks, includeArchived: opts.includeArchived });
   try {
     const repos = await listOwnerRepos(client, opts.owner, opts);
     const repoIds = repos.map((repo) => upsertRepo(db, repo));

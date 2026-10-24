@@ -1,7 +1,8 @@
 import type { Db } from '../db/database.js';
 import {
-  alertStateCounts, criticalTreatmentPlan, monitoringSummary, openAlertAges, openSeverityCounts, worstRepos,
-  type AgeBucket, type AgeBucketRow, type MonitoringSummary, type StateCounts, type TreatmentRow, type WorstRepo,
+  alertStateCounts, criticalTreatmentPlan, monitoringSummary, openAlertAges, openSeverityChange, openSeverityCounts,
+  worstRepos, type AgeBucket, type AgeBucketRow, type MonitoringSummary, type SeverityChange, type StateCounts,
+  type TreatmentRow, type WorstRepo,
 } from '../queries/account.js';
 import { getSnapshot, previousCompleteSnapshot } from '../queries/snapshots.js';
 import type { SeverityCounts } from '../types.js';
@@ -12,8 +13,8 @@ export interface AccountReportData {
   snapshotId: number;
   finishedAt: string;
   open: SeverityCounts;
-  /** Current minus the previous complete snapshot, or null when there is none. */
-  change: SeverityCounts | null;
+  /** Current minus the previous complete snapshot of the same scope, or null when there is none. */
+  change: SeverityChange | null;
   states: StateCounts;
   monitoring: MonitoringSummary;
   worst: WorstRepo[];
@@ -39,12 +40,7 @@ export function buildAccountReportData(db: Db, snapshotId: number, now: Date): A
   if (snapshot === null || snapshot.status !== 'complete') throw new Error(`Snapshot ${snapshotId} is not complete.`);
   const open = openSeverityCounts(db, snapshotId);
   const previous = previousCompleteSnapshot(db, snapshot);
-  let change: SeverityCounts | null = null;
-  if (previous !== null) {
-    const before = openSeverityCounts(db, previous.id);
-    change = { critical: open.critical - before.critical, high: open.high - before.high,
-      medium: open.medium - before.medium, low: open.low - before.low };
-  }
+  const change = previous === null ? null : openSeverityChange(db, snapshotId, previous.id);
   return {
     ownerLogin: snapshot.ownerLogin,
     snapshotId,
@@ -69,15 +65,24 @@ export function renderAccountReport(d: AccountReportData): string {
     '## Headline',
     '',
     `${formatCount(d.open.critical)} critical and ${formatCount(d.open.high)} high open alerts across `
-      + `${formatPlural(m.withOpenAlerts, 'repo')}. Triage has not run yet, so these are Dependabot's raw counts.`,
+      + `${formatPlural(m.withOpenAlerts, 'repo')}.`
+      + (m.errors.length === 0 ? '' : ` ${formatPlural(m.errors.length, 'repo')} couldn't be read, so `
+        + `${m.errors.length === 1 ? 'its' : 'their'} alerts aren't counted.`)
+      + " Triage has not run yet, so these are Dependabot's raw counts.",
     '',
     '## Open alerts by severity',
     '',
     '| Severity | Open | Change since previous snapshot |',
     '|---|---:|---:|',
     ...SEVERITY_LABELS.map(([key, label]) =>
-      `| ${label} | ${formatCount(d.open[key])} | ${formatChange(d.change === null ? null : d.change[key])} |`),
+      `| ${label} | ${formatCount(d.open[key])} | ${formatChange(d.change === null ? null : d.change.counts[key])} |`),
     '',
+  ];
+  if (d.change !== null && d.change.leftOutRepos > 0) {
+    out.push(`Change covers only the ${formatPlural(d.change.comparedRepos, 'repo')} read in both snapshots; `
+      + `${formatPlural(d.change.leftOutRepos, 'repo')} read in only one ${d.change.leftOutRepos === 1 ? 'is' : 'are'} left out.`, '');
+  }
+  out.push(
     '## Alert states',
     '',
     '| Open | Dismissed | Auto-dismissed | Fixed |',
@@ -96,7 +101,7 @@ export function renderAccountReport(d: AccountReportData): string {
       : ['Dependabot alerts are turned off for these repos, so they have no data:', '',
         ...m.notMonitored.map((repo) => `- ${codeSpan(repo)}`)]),
     '',
-  ];
+  );
 
   if (m.errors.length > 0) {
     out.push('### Errors', '', ...m.errors.map((e) => `- ${codeSpan(e.repo)}: ${escapeCell(e.message)}`), '');

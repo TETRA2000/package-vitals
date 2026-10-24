@@ -8,6 +8,8 @@ CREATE TABLE snapshots (
   id INTEGER PRIMARY KEY,
   owner_kind TEXT NOT NULL CHECK (owner_kind IN ('user','org')),
   owner_login TEXT NOT NULL,
+  include_forks INTEGER NOT NULL CHECK (include_forks IN (0,1)),
+  include_archived INTEGER NOT NULL CHECK (include_archived IN (0,1)),
   started_at TEXT NOT NULL,
   finished_at TEXT,
   status TEXT NOT NULL CHECK (status IN ('running','complete','failed')),

@@ -15,7 +15,7 @@ describe('snapshot lookup', () => {
     seedSnapshot(db, { status: 'running', repos: [] });
     const latest = latestCompleteSnapshot(db);
     expect(latest).toEqual({ id: 1, ownerKind: 'user', ownerLogin: 'TETRA2000', startedAt: '2026-10-24T00:00:00.000Z',
-      finishedAt: '2026-10-24T01:00:00.000Z', status: 'complete' });
+      finishedAt: '2026-10-24T01:00:00.000Z', status: 'complete', includeForks: false, includeArchived: false });
     expect(previousCompleteSnapshot(db, latest!)).toBeNull();
   });
 
@@ -34,6 +34,16 @@ describe('snapshot lookup', () => {
     expect(previousCompleteSnapshot(db, getSnapshot(db, 4)!)?.id).toBe(1);
     expect(latestCompleteSnapshot(db, 'acme')?.id).toBe(2);
     expect(latestCompleteSnapshot(db, 'TETRA2000')?.id).toBe(4);
+  });
+
+  it('previousCompleteSnapshot only matches a snapshot with the same scope', () => {
+    db = openDatabase(':memory:');
+    seedSnapshot(db, { repos: [] });
+    seedSnapshot(db, { includeArchived: true, repos: [] });
+    seedSnapshot(db, { repos: [] });
+    expect(getSnapshot(db, 2)).toMatchObject({ includeForks: false, includeArchived: true });
+    expect(previousCompleteSnapshot(db, getSnapshot(db, 3)!)?.id).toBe(1);
+    expect(previousCompleteSnapshot(db, getSnapshot(db, 2)!)).toBeNull();
   });
 
   it('getSnapshot returns any status, or null', () => {

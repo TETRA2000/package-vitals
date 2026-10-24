@@ -93,6 +93,12 @@ describe('runCheckup', () => {
       WHERE r.full_name = 'TETRA2000/c'`)).toEqual([{ alerts_status: 'error', alerts_error: 'fetch failed', sbom_status: 'unavailable' }]);
   });
 
+  it('records the scope on the snapshot', async () => {
+    const { db, deps } = setup();
+    await runCheckup(deps, { ...OPTS, includeArchived: true });
+    expect(all(db, 'SELECT include_forks, include_archived FROM snapshots')).toEqual([{ include_forks: 0, include_archived: 1 }]);
+  });
+
   it('a second checkup appends a snapshot and upserts repos', async () => {
     const db = openDatabase(':memory:');
     dbs.push(db);
