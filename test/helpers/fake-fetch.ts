@@ -4,6 +4,8 @@ export interface FakeResponse {
   status?: number;
   body?: unknown;
   headers?: Record<string, string>;
+  /** Rejects the call the way fetch does when the network is down. */
+  networkError?: true;
 }
 
 /** One response for every call, or a list served in order, one per call. */
@@ -38,6 +40,7 @@ export function fakeFetch(routes: Record<string, FakeRoute>): FetchLike & { call
     } else {
       r = route;
     }
+    if (r.networkError) throw new TypeError('fetch failed');
     return new Response(JSON.stringify(r.body ?? null), {
       status: r.status ?? 200,
       headers: { 'content-type': 'application/json', ...r.headers },

@@ -76,7 +76,15 @@ export class GitHubClient {
       'User-Agent': 'package-vitals',
     };
     for (let attempt = 0; ; attempt++) {
-      const response = await this.#fetch(url, { method: 'GET', headers });
+      let response: Response;
+      try {
+        response = await this.#fetch(url, { method: 'GET', headers });
+      } catch (err) {
+        // fetch rejects with a TypeError when the network drops (sleep, Wi-Fi roaming), so back off and try again.
+        if (!(err instanceof TypeError) || attempt >= this.#maxRetries) throw err;
+        await this.#sleep(backoff(attempt));
+        continue;
+      }
       if (response.ok) return { body: await response.json(), response };
 
       const body: unknown = await response.json().catch(() => null);
@@ -84,7 +92,8 @@ export class GitHubClient {
         ? body.message
         : response.statusText || 'Request failed';
       const error = new GitHubApiError(response.status, message, url);
-      const wait = this.#rateLimitWait(response, message);
+      const wait = this.#rateLimitWait(response, message)
+        ?? (TRANSIENT_STATUSES.has(response.status) ? backoff(attempt) : null);
       if (wait === null || attempt >= this.#maxRetries) throw error;
       await this.#sleep(wait);
     }
@@ -103,6 +112,14 @@ export class GitHubClient {
     if (response.status === 429 || /rate limit/i.test(message)) return 60_000;
     return null;
   }
+}
+
+/** Gateway errors that usually clear up on their own. Other 5xx responses fail at once. */
+const TRANSIENT_STATUSES = new Set([502, 503, 504]);
+
+/** 1 s, 4 s, 16 s, … */
+function backoff(attempt: number): number {
+  return 1000 * 4 ** attempt;
 }
 
 function nextLink(link: string | null): string | null {

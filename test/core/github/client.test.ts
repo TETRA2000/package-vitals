@@ -91,6 +91,36 @@ describe('GitHubClient', () => {
     expect(f.calls).toHaveLength(1);
   });
 
+  it('retries a network error with backoff', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const f = fakeFetch({ '/user': [{ networkError: true }, { networkError: true }, { body: { login: 'TETRA2000' } }] });
+    expect(await new GitHubClient({ token: TOKEN, fetch: f, sleep }).getJson('/user')).toEqual({ login: 'TETRA2000' });
+    expect(sleep.mock.calls).toEqual([[1000], [4000]]);
+  });
+
+  it('retries 502, 503, and 504 with backoff', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const f = fakeFetch({ '/user': [{ status: 502, body: { message: 'Bad Gateway' } }, { status: 503, body: null },
+      { status: 504, body: null }, { body: { login: 'TETRA2000' } }] });
+    expect(await new GitHubClient({ token: TOKEN, fetch: f, sleep }).getJson('/user')).toEqual({ login: 'TETRA2000' });
+    expect(sleep.mock.calls).toEqual([[1000], [4000], [16_000]]);
+  });
+
+  it('gives up on a network error after maxRetries and rethrows it', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const down = { networkError: true } as const;
+    const f = fakeFetch({ '/user': [down, down, down, down] });
+    await expect(new GitHubClient({ token: TOKEN, fetch: f, sleep }).getJson('/user')).rejects.toThrow('fetch failed');
+    expect(f.calls).toHaveLength(4);
+  });
+
+  it('does not retry a 500', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const f = fakeFetch({ '/user': { status: 500, body: { message: 'Server Error' } } });
+    await expect(new GitHubClient({ token: TOKEN, fetch: f, sleep }).getJson('/user')).rejects.toThrow('Server Error (HTTP 500)');
+    expect(f.calls).toHaveLength(1);
+  });
+
   it('gives up after maxRetries', async () => {
     const sleep = vi.fn(async (_ms: number) => {});
     const limited = { status: 429, body: { message: 'Too Many Requests' }, headers: { 'retry-after': '1' } };

@@ -74,6 +74,12 @@ describe('package-vitals CLI', () => {
     expect(c.out[0]).toMatch(/^Checked 3 repos: .* 1 not monitored, 1 with errors\. Snapshot 1\.$/);
   });
 
+  it('warns when some repos could not be read', async () => {
+    const c = cli();
+    await c.run('checkup', '--include-forks');
+    expect(c.err.at(-1)).toBe("Warning: alerts for 1 repo couldn't be read and aren't counted. Run the checkup again to retry.");
+  });
+
   it('report repo writes a chart', async () => {
     const c = cli();
     await c.run('checkup');

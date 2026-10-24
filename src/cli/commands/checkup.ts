@@ -23,6 +23,10 @@ export async function checkupCommand(
     deps.stdout(`Checked ${formatPlural(s.reposChecked, 'repo')}: ${formatCount(s.open.critical)} critical, `
       + `${formatCount(s.open.high)} high, ${formatCount(s.open.medium)} medium, ${formatCount(s.open.low)} low open alerts. `
       + `${formatCount(s.notMonitored)} not monitored, ${formatCount(s.errors)} with errors. Snapshot ${s.snapshotId}.`);
+    if (s.errors > 0) {
+      deps.stderr(`Warning: alerts for ${formatPlural(s.errors, 'repo')} couldn't be read and aren't counted. `
+        + 'Run the checkup again to retry.');
+    }
     return 0;
   } finally {
     db.close();
