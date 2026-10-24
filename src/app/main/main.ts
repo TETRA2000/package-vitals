@@ -1,20 +1,31 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, protocol, session } from 'electron';
-import { resolveDataHome } from '../../core/paths.js';
+import { app, BrowserWindow, ipcMain, protocol, session } from 'electron';
+import { openDatabase, type Db } from '../../core/db/database.js';
+import { dataPaths, resolveDataHome } from '../../core/paths.js';
+import { queueHandlers } from './handlers/queue.js';
+import { registerIpc } from './ipc.js';
 import { registerAppProtocol } from './protocol.js';
-import { hardenSession, hardenWebContents, webPreferences } from './security.js';
+import { hardenSession, hardenWebContents, isAppUrl, webPreferences } from './security.js';
 
 // The Electron entry point: wiring only. It is the one module that imports electron at runtime.
 
+const home = resolveDataHome(process.env, process.platform, homedir());
+let db: Db | undefined;
+
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true } }]);
 app.enableSandbox();
-app.setPath('userData', resolveDataHome(process.env, process.platform, homedir()));
+app.setPath('userData', home);
 app.on('web-contents-created', (_event, contents) => hardenWebContents(contents));
 
 app.whenReady().then(() => {
   hardenSession(session.defaultSession);
   registerAppProtocol(protocol, path.join(import.meta.dirname, '../renderer'));
+
+  const database = openDatabase(dataPaths(home).db);
+  db = database;
+  registerIpc(ipcMain, queueHandlers({ db: database, checkupRunning: () => false }),
+    (url) => url !== undefined && isAppUrl(url));
 
   const win = new BrowserWindow({
     width: 1280,
@@ -28,3 +39,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => app.quit());
+app.on('will-quit', () => {
+  db?.close();
+  db = undefined;
+});
