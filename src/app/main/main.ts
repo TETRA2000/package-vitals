@@ -76,6 +76,25 @@ app.whenReady().then(() => {
   app.quit();
 });
 
+/** An error's message and stack, and nothing else it carries. */
+function errorText(err: unknown): string {
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
+}
+
+// Crashes go to stderr: only reasons, exit codes, and error messages and stacks (core errors never hold the
+// token). None of these listeners changes what Electron does next.
+app.on('render-process-gone', (_event, _contents, details) => {
+  console.error(`Renderer process gone: ${details.reason} (exit code ${details.exitCode})`);
+});
+app.on('child-process-gone', (_event, details) => {
+  console.error(`Child process gone: ${details.reason} (exit code ${details.exitCode})`);
+});
+// An unhandled rejection doesn't stop Electron's main process. This logs it in place of Node's warning.
+process.on('unhandledRejection', (reason) => console.error(`Unhandled rejection: ${errorText(reason)}`));
+// The monitor, not an 'uncaughtException' listener: Electron shows its error box only while its own listener
+// is the only one.
+process.on('uncaughtExceptionMonitor', (err) => console.error(`Uncaught exception: ${errorText(err)}`));
+
 app.on('window-all-closed', () => app.quit());
 app.on('will-quit', () => {
   db?.close();
