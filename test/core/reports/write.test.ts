@@ -33,8 +33,9 @@ describe('report files', () => {
   it('writes the report and records it', () => {
     const s = setup();
     const reports = path.join(tmp, 'reports');
-    const file = writeReport(db, reports, { kind: 'account', snapshotId: s.id, repoId: null,
+    const { id, path: file } = writeReport(db, reports, { kind: 'account', snapshotId: s.id, repoId: null,
       fileName: accountReportFileName(s), content: '# hi\n', createdAt: '2026-10-24T12:00:00.000Z' });
+    expect(id).toBe(1);
     expect(file).toBe(path.join(reports, '2026-10-24-account-snapshot-3.md'));
     expect(path.isAbsolute(file)).toBe(true);
     expect(readFileSync(file, 'utf8')).toBe('# hi\n');

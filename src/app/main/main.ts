@@ -5,6 +5,7 @@ import { openDatabase, type Db } from '../../core/db/database.js';
 import { dataPaths, resolveDataHome } from '../../core/paths.js';
 import { actionHandlers } from './handlers/actions.js';
 import { queueHandlers } from './handlers/queue.js';
+import { reportHandlers } from './handlers/reports.js';
 import { registerIpc } from './ipc.js';
 import { registerAppProtocol } from './protocol.js';
 import { hardenSession, hardenWebContents, isAppUrl, webPreferences } from './security.js';
@@ -32,6 +33,7 @@ app.whenReady().then(() => {
     openExternal: (url) => shell.openExternal(url),
     writeClipboard: (text) => clipboard.writeText(text),
   }), isTrustedSender);
+  registerIpc(ipcMain, reportHandlers({ db: database, reportsDir: dataPaths(home).reports, now: () => new Date() }), isTrustedSender);
 
   const win = new BrowserWindow({
     width: 1280,

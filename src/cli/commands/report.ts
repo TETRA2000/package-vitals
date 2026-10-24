@@ -1,9 +1,7 @@
 import { openDatabase } from '../../core/db/database.js';
 import { dataPaths, resolveDataHome } from '../../core/paths.js';
 import { getSnapshot, latestCompleteSnapshot } from '../../core/queries/snapshots.js';
-import { buildAccountReportData, renderAccountReport } from '../../core/reports/account-report.js';
-import { buildRepoChartData, renderRepoChart } from '../../core/reports/repo-chart.js';
-import { accountReportFileName, repoChartFileName, writeReport } from '../../core/reports/write.js';
+import { generateAccountReport, generateRepoChart } from '../../core/reports/generate.js';
 import type { CliDeps } from '../main.js';
 
 const NO_CHECKUP = 'No completed checkup yet. Run `package-vitals checkup` first.';
@@ -22,19 +20,15 @@ export async function reportCommand(
     }
     const createdAt = deps.now().toISOString();
     if (opts.kind === 'account') {
-      // Alert ages are measured at the snapshot, so a report is reproducible from the database.
-      const content = renderAccountReport(buildAccountReportData(db, s.id, new Date(s.finishedAt ?? s.startedAt)));
-      deps.stdout(writeReport(db, paths.reports,
-        { kind: 'account', snapshotId: s.id, repoId: null, fileName: accountReportFileName(s), content, createdAt }));
+      deps.stdout(generateAccountReport(db, paths.reports, s, createdAt).path);
       return 0;
     }
-    const data = buildRepoChartData(db, s.id, opts.fullName);
-    if (data === null) {
+    const chart = generateRepoChart(db, paths.reports, s, opts.fullName, createdAt);
+    if (chart === null) {
       deps.stderr(`Repo ${opts.fullName} is not in snapshot ${s.id}.`);
       return 1;
     }
-    deps.stdout(writeReport(db, paths.reports, { kind: 'repo', snapshotId: s.id, repoId: data.view.repoId,
-      fileName: repoChartFileName(s, data.view.fullName), content: renderRepoChart(data), createdAt }));
+    deps.stdout(chart.path);
     return 0;
   } finally {
     db.close();

@@ -22,18 +22,18 @@ export function repoChartFileName(s: SnapshotRow, fullName: string): string {
   return `${utcDate(s)}-repo-${safe(owner)}-${safe(name)}-snapshot-${s.id}.md`;
 }
 
-/** Writes a report into `reportsDir`, records it, and returns its absolute path. */
+/** Writes a report into `reportsDir`, records it, and returns its row id and absolute path. */
 export function writeReport(
   db: Db,
   reportsDir: string,
   r: { kind: 'account' | 'repo'; snapshotId: number; repoId: number | null; fileName: string; content: string; createdAt: string },
-): string {
+): { id: number; path: string } {
   const dir = path.resolve(reportsDir);
   const file = path.resolve(dir, r.fileName);
   if (path.dirname(file) !== dir) throw new Error(`Report file name must stay inside the reports folder: ${r.fileName}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(file, r.content);
-  db.prepare('INSERT INTO reports (snapshot_id, kind, repo_id, path, created_at) VALUES (?, ?, ?, ?, ?)')
+  const { lastInsertRowid } = db.prepare('INSERT INTO reports (snapshot_id, kind, repo_id, path, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(r.snapshotId, r.kind, r.repoId, file, r.createdAt);
-  return file;
+  return { id: Number(lastInsertRowid), path: file };
 }
