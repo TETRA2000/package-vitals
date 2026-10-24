@@ -1,11 +1,10 @@
 import type { Db } from '../db/database.js';
 import {
   alertStateCounts, criticalTreatmentPlan, monitoringSummary, openAlertAges, openSeverityChange, openSeverityCounts,
-  worstRepos, type AgeBucket, type AgeBucketRow, type MonitoringSummary, type SeverityChange, type StateCounts,
-  type TreatmentRow, type WorstRepo,
+  worstRepos, type AgeBucket, type AgeBucketRow, type SeverityChange, type StateCounts, type WorstRepo,
 } from '../queries/account.js';
 import { getSnapshot, previousCompleteSnapshot } from '../queries/snapshots.js';
-import type { SeverityCounts } from '../types.js';
+import type { MonitoringSummary, SeverityCounts, TreatmentRow } from '../types.js';
 import { codeSpan, escapeCell, formatChange, formatCount, formatDate, formatPlural, formatTimestamp } from './markdown.js';
 
 export interface AccountReportData {
