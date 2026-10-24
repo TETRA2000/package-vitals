@@ -187,6 +187,22 @@ describe('the built app', () => {
     ]);
   });
 
+  it('the session cancels every request that leaves the app', async () => {
+    // The CSP guards the app's page; the session's request filter guards every window, including one with no CSP.
+    const outcome = await app.evaluate(async ({ BrowserWindow }, url) => {
+      const win = new BrowserWindow({ show: false });
+      try {
+        await win.loadURL(url);
+        return 'loaded';
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      } finally {
+        win.destroy();
+      }
+    }, OUTSIDE_URL);
+    expect(outcome).toContain('ERR_BLOCKED_BY_CLIENT');
+  });
+
   it('a generated report renders without links or images', async () => {
     await page.getByRole('navigation', { name: 'Views' }).getByRole('button', { name: 'Reports', exact: true }).click();
     await page.getByRole('button', { name: 'Generate account report' }).click();
