@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Overview, VitalsApi } from '../shared/api.js';
+import { CheckupButton } from './components/CheckupButton';
 import { formatUtc, ipcErrorMessage } from './format';
 import { QueueView } from './views/QueueView';
 import { RepoCardsView } from './views/RepoCardsView';
@@ -78,6 +79,7 @@ export function App({ api }: { api: VitalsApi }) {
             </button>
           ))}
         </nav>
+        <CheckupButton api={api} running={overview?.checkupRunning ?? false} onDone={reload} />
         {snapshot && (
           <p className="snapshot">{`Snapshot ${snapshot.id} · ${snapshot.ownerLogin} · completed ${formatUtc(snapshot.finishedAt)}`}</p>
         )}

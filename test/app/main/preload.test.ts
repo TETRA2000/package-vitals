@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { INVOKE_METHODS, type VitalsApi } from '../../../src/app/shared/api.js';
+import { channelFor, CHECKUP_PROGRESS_CHANNEL, INVOKE_METHODS, type VitalsApi } from '../../../src/app/shared/api.js';
 
 type Listener = (...args: unknown[]) => void;
 
@@ -45,13 +45,13 @@ describe('preload', () => {
     electron.ipcRenderer.invoke.mockResolvedValue('from main');
     const key = { snapshotId: 1, repoId: 2, number: 3 };
     await expect(api.getFinding(key)).resolves.toBe('from main');
-    expect(electron.ipcRenderer.invoke).toHaveBeenCalledExactlyOnceWith('vitals:getFinding', key);
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledExactlyOnceWith(channelFor('getFinding'), key);
 
     for (const method of INVOKE_METHODS) {
       electron.ipcRenderer.invoke.mockClear();
       const arg = { for: method };
       await (api[method] as (arg: unknown) => Promise<unknown>)(arg);
-      expect(electron.ipcRenderer.invoke, method).toHaveBeenCalledExactlyOnceWith(`vitals:${method}`, arg);
+      expect(electron.ipcRenderer.invoke, method).toHaveBeenCalledExactlyOnceWith(channelFor(method), arg);
     }
   });
 
@@ -59,12 +59,12 @@ describe('preload', () => {
     const listener = vi.fn();
     const unsubscribe = exposedApi().onCheckupProgress(listener);
     const progress = { done: 1, total: 3, repo: 'TETRA2000/a' };
-    send('vitals:checkup-progress', progress);
+    send(CHECKUP_PROGRESS_CHANNEL, progress);
     expect(listener.mock.calls).toEqual([[progress]]);
 
     unsubscribe();
-    send('vitals:checkup-progress', { done: 2, total: 3, repo: 'TETRA2000/b' });
+    send(CHECKUP_PROGRESS_CHANNEL, { done: 2, total: 3, repo: 'TETRA2000/b' });
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(electron.listeners.get('vitals:checkup-progress')?.size).toBe(0);
+    expect(electron.listeners.get(CHECKUP_PROGRESS_CHANNEL)?.size).toBe(0);
   });
 });

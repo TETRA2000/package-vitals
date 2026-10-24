@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type * as Shared from '../shared/api.js' with { 'resolution-mode': 'import' };
 import type { CheckupProgress, InvokeMethod, VitalsApi } from '../shared/api.js' with { 'resolution-mode': 'import' };
 
 // The only bridge from the renderer to main. It exposes named methods, never ipcRenderer itself or a
@@ -23,7 +24,7 @@ const METHODS = [
 type AssertNever<T extends never> = T;
 type _EveryMethodListed = AssertNever<Exclude<InvokeMethod, (typeof METHODS)[number]>>;
 
-const CHECKUP_PROGRESS_CHANNEL = 'vitals:checkup-progress';
+const CHECKUP_PROGRESS_CHANNEL = 'vitals:checkup-progress' satisfies typeof Shared.CHECKUP_PROGRESS_CHANNEL;
 
 const invokers = Object.fromEntries(
   METHODS.map((method) => [method, (arg?: unknown) => ipcRenderer.invoke(`vitals:${method}`, arg)]),

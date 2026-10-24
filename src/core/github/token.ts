@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
 export type ExecLike = (cmd: string, args: string[]) => Promise<{ stdout: string }>;
 
 /** A missing or unusable outside tool. Its message is meant for the owner. */
@@ -23,3 +26,8 @@ export async function getGitHubToken(exec: ExecLike): Promise<string> {
   if (!token) throw new ToolError(NOT_LOGGED_IN);
   return token;
 }
+
+/** The real `ExecLike`: runs a program with no shell and returns its stdout. */
+export const execFileText: ExecLike = async (cmd, args) => ({
+  stdout: (await promisify(execFile)(cmd, args, { encoding: 'utf8' })).stdout,
+});

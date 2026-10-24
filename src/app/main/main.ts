@@ -1,11 +1,13 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, clipboard, ipcMain, protocol, session, shell } from 'electron';
+import { runAccountCheckup } from '../../core/checkup/account-checkup.js';
 import { openDatabase, type Db } from '../../core/db/database.js';
+import { execFileText } from '../../core/github/token.js';
 import { dataPaths, resolveDataHome } from '../../core/paths.js';
-import { actionHandlers } from './handlers/actions.js';
-import { queueHandlers } from './handlers/queue.js';
-import { reportHandlers } from './handlers/reports.js';
+import { createCheckupController } from './checkup.js';
+import { createAllHandlers } from './handlers/index.js';
+import { CHECKUP_PROGRESS_CHANNEL } from '../shared/api.js';
 import { registerIpc } from './ipc.js';
 import { registerAppProtocol } from './protocol.js';
 import { hardenSession, hardenWebContents, isAppUrl, webPreferences } from './security.js';
@@ -27,14 +29,6 @@ app.whenReady().then(() => {
   const database = openDatabase(dataPaths(home).db);
   db = database;
   const isTrustedSender = (url: string | undefined) => url !== undefined && isAppUrl(url);
-  registerIpc(ipcMain, queueHandlers({ db: database, checkupRunning: () => false }), isTrustedSender);
-  registerIpc(ipcMain, actionHandlers({
-    db: database,
-    openExternal: (url) => shell.openExternal(url),
-    writeClipboard: (text) => clipboard.writeText(text),
-  }), isTrustedSender);
-  registerIpc(ipcMain, reportHandlers({ db: database, reportsDir: dataPaths(home).reports, now: () => new Date() }), isTrustedSender);
-
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -42,8 +36,29 @@ app.whenReady().then(() => {
     show: false,
     webPreferences: webPreferences(path.join(import.meta.dirname, '../preload/preload.cjs')),
   });
+  const controller = createCheckupController({
+    run: (onProgress) => runAccountCheckup(
+      { db: database, exec: execFileText, now: () => new Date(), onProgress },
+      { includeForks: false, includeArchived: false, concurrency: 8 },
+    ),
+    onProgress: (p) => {
+      if (!win.isDestroyed()) win.webContents.send(CHECKUP_PROGRESS_CHANNEL, p);
+    },
+  });
+  registerIpc(ipcMain, createAllHandlers({
+    db: database,
+    controller,
+    openExternal: (url) => shell.openExternal(url),
+    writeClipboard: (text) => clipboard.writeText(text),
+    reportsDir: dataPaths(home).reports,
+    now: () => new Date(),
+  }), isTrustedSender);
+
   win.once('ready-to-show', () => win.show());
   void win.loadURL('app://vitals/index.html');
+}).catch((err: unknown) => {
+  console.error(err);
+  app.quit();
 });
 
 app.on('window-all-closed', () => app.quit());

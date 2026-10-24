@@ -67,7 +67,7 @@ type _EveryMethodListed = AssertNever<Exclude<InvokeMethod, (typeof METHODS)[num
 
 export const INVOKE_METHODS: readonly InvokeMethod[] = METHODS;
 
-export const CHECKUP_PROGRESS_CHANNEL = 'vitals:checkup-progress';
+export const CHECKUP_PROGRESS_CHANNEL = 'vitals:checkup-progress' as const;
 
 export function channelFor(m: InvokeMethod): string {
   return `vitals:${m}`;
