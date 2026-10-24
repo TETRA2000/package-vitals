@@ -1,0 +1,193 @@
+import type { WebContents, WebPreferences } from 'electron';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { _electron, type ElectronApplication, type Page } from 'playwright';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CONTENT_SECURITY_POLICY, META_CONTENT_SECURITY_POLICY } from '../../src/app/main/security.js';
+import type { VitalsApi } from '../../src/app/shared/api.js';
+import { openDatabase } from '../../src/core/db/database.js';
+import { dataPaths } from '../../src/core/paths.js';
+import { seedSnapshot } from '../helpers/seed.js';
+
+// Launches the real built app (run `npm run build` first) on a seeded temp data home and checks that its
+// hardening holds together.
+
+// This project has Node's types, not the DOM's. These are the page globals the evaluate callbacks touch;
+// the callbacks run in the page, where `window` is the real one.
+declare const window: {
+  vitals: VitalsApi;
+  __pwned?: unknown;
+  location: { href: string };
+  open(url: string): unknown;
+  document: { querySelector(selector: string): { getAttribute(name: string): string | null } | null };
+};
+
+const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
+const APP_URL = 'app://vitals/index.html';
+const OUTSIDE_URL = 'https://example.com/';
+const HOSTILE_SUMMARY = '<img src=x onerror="window.__pwned = true">';
+/** Repo b's read error reaches the account report: a bare URL, Markdown image syntax, and raw HTML. */
+const HOSTILE_ERROR = 'Moved to https://example.com/moved ![logo](https://example.com/logo.png) <img src=x>';
+/** Every key the preload may expose. A new one has to be added here on purpose. */
+const VITALS_KEYS = [
+  'copyFindingMarkdown',
+  'generateReport',
+  'getFinding',
+  'getOverview',
+  'getTreatmentPlan',
+  'listFindings',
+  'listRepoCards',
+  'listReports',
+  'onCheckupProgress',
+  'openFindingOnGitHub',
+  'readReport',
+  'startCheckup',
+] as const satisfies readonly (keyof VitalsApi)[];
+
+let home: string | undefined;
+let snapshotId: number;
+let app: ElectronApplication;
+let page: Page;
+
+beforeAll(async () => {
+  home = mkdtempSync(path.join(tmpdir(), 'package-vitals-e2e-'));
+  const db = openDatabase(dataPaths(home).db);
+  try {
+    snapshotId = seedSnapshot(db, {
+      repos: [
+        { name: 'a', alerts: [{ severity: 'critical', summary: HOSTILE_SUMMARY }] },
+        { name: 'b', alertsStatus: 'error', alertsError: HOSTILE_ERROR },
+      ],
+    });
+  } finally {
+    db.close();
+  }
+
+  app = await _electron.launch({
+    args: ['.'],
+    cwd: REPO_ROOT,
+    // process.env never holds undefined values at runtime; its type just allows them.
+    env: { ...process.env, PACKAGE_VITALS_HOME: home } as Record<string, string>,
+    // On Linux, Playwright passes --no-sandbox unless this is set. The test runs the app as shipped.
+    chromiumSandbox: true,
+  });
+  page = await app.firstWindow();
+  // The seeded snapshot has loaded once the queue shows its findings.
+  await page.getByRole('listbox', { name: 'Findings' }).waitFor();
+});
+
+afterAll(async () => {
+  try {
+    await app?.close();
+  } finally {
+    if (home !== undefined) rmSync(home, { recursive: true, force: true });
+  }
+});
+
+describe('the built app', () => {
+  it('the window is sandboxed and isolated', async () => {
+    const prefs = await app.evaluate(({ BrowserWindow }) => {
+      const windows = BrowserWindow.getAllWindows();
+      // Electron has this method but leaves it out of its typings.
+      const contents = windows[0]?.webContents as (WebContents & { getLastWebPreferences(): WebPreferences | null }) | undefined;
+      const p = contents?.getLastWebPreferences();
+      return { windows: windows.length, sandbox: p?.sandbox, contextIsolation: p?.contextIsolation, nodeIntegration: p?.nodeIntegration };
+    });
+    expect(prefs).toEqual({ windows: 1, sandbox: true, contextIsolation: true, nodeIntegration: false });
+  });
+
+  it('the page has no Node and exactly the vitals API', async () => {
+    const globals = await page.evaluate(() => ({
+      require: typeof require,
+      process: typeof process,
+      module: typeof module,
+      vitals: Object.keys(window.vitals).sort(),
+    }));
+    expect(globals).toEqual({ require: 'undefined', process: 'undefined', module: 'undefined', vitals: [...VITALS_KEYS] });
+  });
+
+  it('the CSP is in place', async () => {
+    // A meta tag can't carry frame-ancestors, so the page's copy is the policy without it.
+    const meta = await page.evaluate(() =>
+      window.document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content'));
+    expect(meta).toBe(META_CONTENT_SECURITY_POLICY);
+
+    // The response header carries the whole policy. Reloading is the way to see the page's response.
+    const response = await page.reload();
+    expect(response?.headers()['content-security-policy']).toBe(CONTENT_SECURITY_POLICY);
+    await page.getByRole('listbox', { name: 'Findings' }).waitFor();
+  });
+
+  it('hostile advisory text stays text', async () => {
+    const row = page.getByRole('option').filter({ hasText: HOSTILE_SUMMARY });
+    await row.waitFor();
+    expect(await row.textContent()).toContain(HOSTILE_SUMMARY);
+
+    await row.click();
+    await page.getByRole('complementary', { name: 'Finding details' }).getByText(HOSTILE_SUMMARY, { exact: true }).waitFor();
+
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
+    expect(await page.locator('img').count()).toBe(0);
+  });
+
+  it('the API rejects crafted input', async () => {
+    const outcomes = await page.evaluate(async (id) => {
+      const settle = (p: Promise<unknown>) =>
+        p.then(() => 'resolved', (err: unknown) => (err instanceof Error ? err.message : String(err)));
+      return Promise.all([
+        settle(window.vitals.readReport(999999)),
+        settle(window.vitals.readReport('../../etc/passwd' as unknown as number)),
+        settle(window.vitals.listFindings({ snapshotId: id, filter: { severities: [], repoId: null, ecosystem: null } })),
+      ]);
+    }, snapshotId);
+    expect(outcomes).toEqual([
+      expect.stringContaining('Report not found.'),
+      expect.stringContaining('reportId must be a positive integer.'),
+      expect.stringContaining('request.filter.severities must be a non-empty list of distinct severities.'),
+    ]);
+  });
+
+  it('a generated report renders without links or images', async () => {
+    await page.getByRole('navigation', { name: 'Views' }).getByRole('button', { name: 'Reports', exact: true }).click();
+    await page.getByRole('button', { name: 'Generate account report' }).click();
+    const report = page.locator('article.report');
+    await report.waitFor();
+
+    const text = await report.textContent();
+    expect(text).toContain('Account health report: TETRA2000');
+    expect(text).toContain(HOSTILE_ERROR);
+    expect(await report.locator('a').count()).toBe(0);
+    expect(await report.locator('img').count()).toBe(0);
+  });
+
+  // Last on purpose: main cancels the navigation without telling DevTools, so Playwright keeps it pending
+  // and every later locator action would wait for it to finish.
+  it('nothing reaches the network or leaves the app', async () => {
+    expect(await page.evaluate((url) => fetch(url).then(() => 'reached', () => 'blocked'), OUTSIDE_URL)).toBe('blocked');
+
+    expect(await page.evaluate((url) => window.open(url), OUTSIDE_URL)).toBeNull();
+    expect(app.windows()).toHaveLength(1);
+
+    // Proving a navigation never happens needs a bounded wait. Main records the attempt, so the test knows
+    // it reached the guard, and then a navigation gets two seconds to commit. Without the guard, the blocked
+    // request commits an error page for the outside URL within milliseconds.
+    await app.evaluate(({ BrowserWindow }) => {
+      const seen: string[] = [];
+      (globalThis as { attemptedNavigations?: string[] }).attemptedNavigations = seen;
+      BrowserWindow.getAllWindows()[0]?.webContents.on('will-navigate', (event) => {
+        seen.push(event.url);
+      });
+    });
+    const navigated = page.waitForEvent('framenavigated', { timeout: 2_000 }).then(() => true, () => false);
+    await page.evaluate((url) => {
+      window.location.href = url;
+    }, OUTSIDE_URL);
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as { attemptedNavigations?: string[] }).attemptedNavigations))
+      .toEqual([OUTSIDE_URL]);
+    expect(await navigated).toBe(false);
+    expect(page.url()).toBe(APP_URL);
+    expect(await page.evaluate(() => window.location.href)).toBe(APP_URL);
+  });
+});
