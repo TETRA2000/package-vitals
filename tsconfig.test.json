@@ -4,5 +4,6 @@
     "rootDir": ".",
     "noEmit": true
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["src", "test", "vitest.config.ts", "vite.config.ts"],
+  "exclude": ["src/app/renderer", "test/app/renderer"]
 }
