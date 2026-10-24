@@ -1,6 +1,9 @@
 import type { Session, WebContents, WebPreferences, WebRequest } from 'electron';
 
-/** Sent as a response header by the app protocol and repeated in index.html's meta tag. */
+/**
+ * Sent as a response header by the app protocol. index.html's meta tag repeats it without `frame-ancestors`
+ * (see META_CONTENT_SECURITY_POLICY).
+ */
 export const CONTENT_SECURITY_POLICY =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
   "connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
