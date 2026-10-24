@@ -1,5 +1,5 @@
 import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 import type { FindingRow } from '../../../core/types.js';
 import { formatAge } from '../format';
 
@@ -31,9 +31,17 @@ export function FindingList({ rows, selectedIndex, onSelect, now }: FindingListP
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the virtualizer instance is stable
   }, [selectedIndex]);
 
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const next = selectedIndex === null ? 0 : selectedIndex + (e.key === 'ArrowDown' ? 1 : -1);
+    const clamped = Math.min(Math.max(next, 0), rows.length - 1);
+    if (clamped !== selectedIndex) onSelect(clamped);
+  }
+
   return (
     <div ref={scrollRef} className="finding-scroll">
-      <div role="listbox" aria-label="Findings" className="finding-list" style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+      <div role="listbox" aria-label="Findings" tabIndex={0} onKeyDown={onKeyDown} className="finding-list" style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((item) => {
           const r = rows[item.index]!;
           return (

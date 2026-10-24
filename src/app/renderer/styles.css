@@ -44,3 +44,8 @@ nav button[aria-current='page'] {
 .finding-row { display: flex; gap: 12px; align-items: center; box-sizing: border-box; padding: 0 8px; white-space: nowrap; cursor: default; }
 .finding-row[aria-selected='true'] { background: Highlight; color: HighlightText; }
 .finding-row .summary { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.queue-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.side-panel { overflow-wrap: anywhere; }
+.side-panel dt { font-weight: 600; margin-top: 8px; }
+.side-panel dd { margin: 0; }
+.side-panel .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }

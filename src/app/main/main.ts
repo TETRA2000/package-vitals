@@ -1,8 +1,9 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, protocol, session } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, session, shell } from 'electron';
 import { openDatabase, type Db } from '../../core/db/database.js';
 import { dataPaths, resolveDataHome } from '../../core/paths.js';
+import { actionHandlers } from './handlers/actions.js';
 import { queueHandlers } from './handlers/queue.js';
 import { registerIpc } from './ipc.js';
 import { registerAppProtocol } from './protocol.js';
@@ -24,8 +25,13 @@ app.whenReady().then(() => {
 
   const database = openDatabase(dataPaths(home).db);
   db = database;
-  registerIpc(ipcMain, queueHandlers({ db: database, checkupRunning: () => false }),
-    (url) => url !== undefined && isAppUrl(url));
+  const isTrustedSender = (url: string | undefined) => url !== undefined && isAppUrl(url);
+  registerIpc(ipcMain, queueHandlers({ db: database, checkupRunning: () => false }), isTrustedSender);
+  registerIpc(ipcMain, actionHandlers({
+    db: database,
+    openExternal: (url) => shell.openExternal(url),
+    writeClipboard: (text) => clipboard.writeText(text),
+  }), isTrustedSender);
 
   const win = new BrowserWindow({
     width: 1280,

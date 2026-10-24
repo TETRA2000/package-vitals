@@ -3,6 +3,7 @@ import type { QueueData } from '../../shared/api.js';
 import type { Severity } from '../../../core/types.js';
 import { FindingList } from '../components/FindingList';
 import { Notices } from '../components/Notices';
+import { SidePanel } from '../components/SidePanel';
 import { SummaryStrip } from '../components/SummaryStrip';
 import { ipcErrorMessage } from '../format';
 import type { ViewProps } from './types';
@@ -58,6 +59,9 @@ export function QueueView({
     );
   }
 
+  const now = overview.snapshot?.finishedAt ?? '';
+  const selected = data !== null && selectedIndex !== null ? (data.rows[selectedIndex] ?? null) : null;
+
   return (
     <section>
       <h2>Queue</h2>
@@ -107,7 +111,14 @@ export function QueueView({
           {data.rows.length === 0 ? (
             <p>No open alerts match these filters.</p>
           ) : (
-            <FindingList rows={data.rows} selectedIndex={selectedIndex} onSelect={setSelectedIndex} now={overview.snapshot?.finishedAt ?? ''} />
+            <div className="queue-layout">
+              <FindingList rows={data.rows} selectedIndex={selectedIndex} onSelect={setSelectedIndex} now={now} />
+              <SidePanel
+                api={api}
+                findingKey={selected === null ? null : { snapshotId: selected.snapshotId, repoId: selected.repoId, number: selected.number }}
+                now={now}
+              />
+            </div>
           )}
         </>
       )}

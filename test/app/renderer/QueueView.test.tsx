@@ -167,4 +167,27 @@ describe('QueueView', () => {
     expect(screen.queryByText(/pkg-1/)).not.toBeInTheDocument();
     expect(within(screen.getByRole('listbox', { name: 'Findings' })).getAllByRole('option')).toHaveLength(1);
   });
+
+  it('moves the selection with the arrow keys', async () => {
+    const user = userEvent.setup();
+    const getFinding = vi.fn(async () => null);
+    const listFindings = vi.fn(async () => ({ rows: [row(1), row(2), row(3)], counts: COUNTS }));
+    render(<QueueView api={fakeApi({ listFindings, getFinding })} overview={OVERVIEW} snapshotId={7} repoFilter={null} onRepoFilterChange={vi.fn()} />);
+    const items = await rows();
+    const key = (n: number) => ({ snapshotId: 7, repoId: 1, number: n });
+    const selected = () => items.map((r) => r.getAttribute('aria-selected'));
+
+    await user.click(items[0]!);
+    expect(getFinding).toHaveBeenLastCalledWith(key(1));
+    await user.keyboard('{ArrowUp}');
+    expect(selected()).toEqual(['true', 'false', 'false']);
+    await user.keyboard('{ArrowDown}');
+    expect(getFinding).toHaveBeenLastCalledWith(key(2));
+    expect(selected()).toEqual(['false', 'true', 'false']);
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(getFinding).toHaveBeenLastCalledWith(key(3));
+    expect(selected()).toEqual(['false', 'false', 'true']);
+    await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}');
+    expect(selected()).toEqual(['true', 'false', 'false']);
+  });
 });
