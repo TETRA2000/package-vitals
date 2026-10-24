@@ -46,35 +46,37 @@ function CardBody({ card, now, onOpenRepo }: { card: RepoCard; now: string; onOp
   if (card.status === 'not_monitored') {
     return (
       <div className="repo-card">
-        <strong>{card.fullName}</strong>
-        <span>Not monitored</span>
+        <strong className="name">{card.fullName}</strong>
+        <span className="status">Not monitored</span>
       </div>
     );
   }
   if (card.status === 'error') {
     return (
       <div className="repo-card">
-        <strong>{card.fullName}</strong>
-        <span>{`Couldn't be read: ${card.error ?? 'unknown error'}`}</span>
+        <strong className="name">{card.fullName}</strong>
+        <span className="status">{`Couldn't be read: ${card.error ?? 'unknown error'}`}</span>
       </div>
     );
   }
   if (card.open === 0) {
     return (
       <div className="repo-card">
-        <strong>{card.fullName}</strong>
-        <span>No open alerts</span>
+        <strong className="name">{card.fullName}</strong>
+        <span className="status">No open alerts</span>
       </div>
     );
   }
   return (
     <button type="button" className="repo-card" onClick={() => onOpenRepo(card.repoId)}>
-      <strong>{card.fullName}</strong>
-      <span>{`Critical ${card.critical}`}</span>
-      <span>{`High ${card.high}`}</span>
-      <span>{`Open ${card.open}`}</span>
-      <span>Reachable —</span>
-      {card.oldestOpenAlert !== null && <span>{`Oldest open alert: ${formatAge(card.oldestOpenAlert, now)}`}</span>}
+      <strong className="name">{card.fullName}</strong>
+      <span className="counts">
+        <span>{`Critical ${card.critical}`}</span>
+        <span>{`High ${card.high}`}</span>
+        <span>{`Open ${card.open}`}</span>
+        <span>Reachable —</span>
+      </span>
+      {card.oldestOpenAlert !== null && <span className="age">{`Oldest open alert: ${formatAge(card.oldestOpenAlert, now)}`}</span>}
     </button>
   );
 }

@@ -108,6 +108,19 @@ describe('QueueView', () => {
     expect(screen.queryByRole('listbox', { name: 'Findings' })).not.toBeInTheDocument();
   });
 
+  it('collapses each notice to its sentence', async () => {
+    const overview: Overview = {
+      ...OVERVIEW,
+      monitoring: { checked: 3, monitored: 1, notMonitored: ['TETRA2000/zaim'], errors: [{ repo: 'TETRA2000/c', message: 'm' }], withOpenAlerts: 0 },
+    };
+    setup({}, overview);
+    for (const sentence of ["1 repo isn't monitored: Dependabot alerts are turned off, so it has no data.", "1 repo couldn't be read in this Checkup:"]) {
+      const summary = await screen.findByText(sentence);
+      expect(summary.tagName).toBe('SUMMARY');
+      expect(summary.closest('details')).not.toHaveAttribute('open');
+    }
+  });
+
   it('uses the plural sentences for several repos', async () => {
     const overview: Overview = {
       ...OVERVIEW,

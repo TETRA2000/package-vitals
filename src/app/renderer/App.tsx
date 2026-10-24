@@ -79,10 +79,10 @@ export function App({ api }: { api: VitalsApi }) {
             </button>
           ))}
         </nav>
-        <CheckupButton api={api} running={overview?.checkupRunning ?? false} onSettled={reload} />
         {snapshot && (
           <p className="snapshot">{`Snapshot ${snapshot.id} · ${snapshot.ownerLogin} · completed ${formatUtc(snapshot.finishedAt)}`}</p>
         )}
+        <CheckupButton api={api} running={overview?.checkupRunning ?? false} onSettled={reload} />
       </header>
       {error !== null && <p role="alert">{`Couldn't load data: ${error}`}</p>}
       <main>

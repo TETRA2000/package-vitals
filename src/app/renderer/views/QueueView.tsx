@@ -63,7 +63,7 @@ export function QueueView({
   const selected = data !== null && selectedIndex !== null ? (data.rows[selectedIndex] ?? null) : null;
 
   return (
-    <section>
+    <section className="queue">
       <h2>Queue</h2>
       <Notices monitoring={overview.monitoring} />
       <div className="filters">

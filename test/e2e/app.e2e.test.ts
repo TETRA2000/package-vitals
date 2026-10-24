@@ -18,6 +18,7 @@ import { seedSnapshot } from '../helpers/seed.js';
 declare const window: {
   vitals: VitalsApi;
   __pwned?: unknown;
+  innerHeight: number;
   location: { href: string };
   open(url: string): unknown;
   document: { querySelector(selector: string): { getAttribute(name: string): string | null } | null };
@@ -29,6 +30,9 @@ const OUTSIDE_URL = 'https://example.com/';
 const HOSTILE_SUMMARY = '<img src=x onerror="window.__pwned = true">';
 /** Repo b's read error reaches the account report: a bare URL, Markdown image syntax, and raw HTML. */
 const HOSTILE_ERROR = 'Moved to https://example.com/moved ![logo](https://example.com/logo.png) <img src=x>';
+/** Enough not monitored repos for a long notice, and enough critical findings to scroll. */
+const NOT_MONITORED = Array.from({ length: 10 }, (_, i) => ({ name: `quiet-${i + 1}`, alertsStatus: 'not_monitored' as const }));
+const MANY_CRITICALS = Array.from({ length: 60 }, () => ({ severity: 'critical' as const }));
 /** Every key the preload may expose. A new one has to be added here on purpose. */
 const VITALS_KEYS = [
   'copyFindingMarkdown',
@@ -58,6 +62,8 @@ beforeAll(async () => {
       repos: [
         { name: 'a', alerts: [{ severity: 'critical', summary: HOSTILE_SUMMARY }] },
         { name: 'b', alertsStatus: 'error', alertsError: HOSTILE_ERROR },
+        { name: 'c', alerts: MANY_CRITICALS },
+        ...NOT_MONITORED,
       ],
     });
   } finally {
@@ -129,6 +135,24 @@ describe('the built app', () => {
 
     expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
     expect(await page.locator('img').count()).toBe(0);
+  });
+
+  it('the arrow keys keep the selection and its actions in view', async () => {
+    const list = page.getByRole('listbox', { name: 'Findings' });
+    await list.getByRole('option').first().click();
+    for (let i = 0; i < 20; i++) await page.keyboard.press('ArrowDown');
+    // Row 0 is repo a's alert (number 1); rows 1 to 60 are repo c's (numbers 2 to 61).
+    const selected = list.locator('[aria-selected="true"]');
+    await selected.filter({ hasText: 'GHSA-seed-21:' }).waitFor();
+    const open = page.getByRole('complementary', { name: 'Finding details' }).getByRole('button', { name: 'Open on GitHub' });
+    await open.waitFor();
+
+    const height = await page.evaluate(() => window.innerHeight);
+    for (const box of [await selected.boundingBox(), await open.boundingBox()]) {
+      expect(box).not.toBeNull();
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(height);
+    }
   });
 
   it('the API rejects crafted input', async () => {
