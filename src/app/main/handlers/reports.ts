@@ -26,21 +26,18 @@ export function reportHandlers(
   const { db } = deps;
 
   async function readContained(file: string): Promise<string> {
-    let realFile: string;
-    let realDir: string;
-    let size: number;
     try {
-      realDir = await realpath(deps.reportsDir);
-      realFile = await realpath(file);
+      const realDir = await realpath(deps.reportsDir);
+      const realFile = await realpath(file);
       const rel = path.relative(realDir, realFile);
       if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) throw new IpcInputError(NOT_FOUND);
-      size = (await stat(realFile)).size;
+      if ((await stat(realFile)).size > MAX_REPORT_BYTES) throw new IpcInputError('Report is too large to show.');
+      return await readFile(realFile, 'utf8');
     } catch (err) {
-      if (isMissing(err)) throw new IpcInputError('Report file is missing.');
-      throw err;
+      if (err instanceof IpcInputError) throw err;
+      // fs errors name absolute paths, so only fixed text goes to the renderer.
+      throw new IpcInputError(isMissing(err) ? 'Report file is missing.' : 'Report could not be read.');
     }
-    if (size > MAX_REPORT_BYTES) throw new IpcInputError('Report is too large to show.');
-    return readFile(realFile, 'utf8');
   }
 
   return {
@@ -59,12 +56,17 @@ export function reportHandlers(
       const snapshot = requireCompleteSnapshot(db, req.snapshotId);
       const createdAt = deps.now().toISOString();
       let created: { id: number } | null;
-      if (req.kind === 'account') {
-        created = generateAccountReport(db, deps.reportsDir, snapshot, createdAt);
-      } else {
-        const repo = snapshotRepos(db, snapshot.id).find((r) => r.id === req.repoId);
-        if (repo === undefined) throw new IpcInputError('Repo is not in this snapshot.');
-        created = generateRepoChart(db, deps.reportsDir, snapshot, repo.fullName, createdAt);
+      try {
+        if (req.kind === 'account') {
+          created = generateAccountReport(db, deps.reportsDir, snapshot, createdAt);
+        } else {
+          const repo = snapshotRepos(db, snapshot.id).find((r) => r.id === req.repoId);
+          if (repo === undefined) throw new IpcInputError('Repo is not in this snapshot.');
+          created = generateRepoChart(db, deps.reportsDir, snapshot, repo.fullName, createdAt);
+        }
+      } catch (err) {
+        if (err instanceof IpcInputError) throw err;
+        throw new IpcInputError('Report could not be written.');
       }
       const entry: ReportEntry | undefined = created === null ? undefined : listReports(db).find((e) => e.id === created.id);
       if (entry === undefined) throw new IpcInputError('Repo is not in this snapshot.');

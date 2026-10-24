@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { reportHandlers } from '../../../src/app/main/handlers/reports.js';
@@ -13,7 +13,7 @@ let reportsDir: string;
 let outside: string;
 beforeEach(() => {
   db = openDatabase(':memory:');
-  tmp = mkdtempSync(path.join(tmpdir(), 'pv-rh-'));
+  tmp = realpathSync(mkdtempSync(path.join(tmpdir(), 'pv-rh-')));
   reportsDir = path.join(tmp, 'reports');
   outside = path.join(tmp, 'outside');
   mkdirSync(reportsDir);
@@ -54,6 +54,26 @@ describe('report handlers', () => {
     const link = path.join(reportsDir, 'link.md');
     symlinkSync(target, link);
     await rejects(handlers().readReport(record(link)), 'Report not found.');
+  });
+
+  it('refuses a file inside a symlinked directory that leads outside', async () => {
+    writeFileSync(path.join(outside, 'secret.md'), 'secret');
+    symlinkSync(outside, path.join(reportsDir, 'dir'));
+    await rejects(handlers().readReport(record(path.join(reportsDir, 'dir', 'secret.md'))), 'Report not found.');
+  });
+
+  it('keeps absolute paths out of read and write errors', async () => {
+    const h = handlers();
+    const notDir = path.join(reportsDir, 'f.md');
+    writeFileSync(notDir, 'x');
+    const read = await h.readReport(record(path.join(notDir, 'x.md'))).catch((e: Error) => e);
+    expect((read as Error).message).toBe('Report could not be read.');
+    expect((read as Error).message).not.toContain(tmp);
+    const snapshotId = seedSnapshot(db, { repos: [{ name: 'a' }] });
+    const blocked = reportHandlers({ db, reportsDir: path.join(notDir, 'sub'), now: () => new Date() });
+    const write = await blocked.generateReport({ kind: 'account', snapshotId }).catch((e: Error) => e);
+    expect((write as Error).message).toBe('Report could not be written.');
+    expect((write as Error).message).not.toContain(tmp);
   });
 
   it('rejects an unknown id, a malformed id, a missing file, and a file over 5 MB', async () => {
