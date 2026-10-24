@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../../src/app/renderer/App.js';
+import type { Overview } from '../../../src/app/shared/api.js';
 import { fakeApi, OVERVIEW } from './fake-api.js';
 
 describe('App', () => {
@@ -40,5 +41,57 @@ describe('App', () => {
     const api = fakeApi({ getOverview: vi.fn(async () => { throw new Error('boom'); }) });
     render(<App api={api} />);
     expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load data: boom");
+  });
+
+  describe('overlapping reloads', () => {
+    function deferred<T>() {
+      let resolve!: (v: T) => void;
+      let reject!: (e: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+    const other = { ...OVERVIEW, snapshot: { ...OVERVIEW.snapshot!, id: 9 } };
+
+    async function focus() {
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+      });
+    }
+
+    it('shows the newer overview when responses arrive out of order', async () => {
+      const first = deferred<Overview>();
+      const second = deferred<Overview>();
+      const getOverview = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      render(<App api={fakeApi({ getOverview })} />);
+      await focus();
+      await act(async () => second.resolve(other));
+      await act(async () => first.resolve(OVERVIEW));
+      expect(screen.getByText(/Snapshot 9/)).toBeInTheDocument();
+      expect(screen.queryByText(/Snapshot 7/)).not.toBeInTheDocument();
+    });
+
+    it('ignores an older failure after a newer success', async () => {
+      const first = deferred<Overview>();
+      const second = deferred<Overview>();
+      const getOverview = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      render(<App api={fakeApi({ getOverview })} />);
+      await focus();
+      await act(async () => second.resolve(OVERVIEW));
+      await act(async () => first.reject(new Error('late')));
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByText(/Snapshot 7/)).toBeInTheDocument();
+    });
+
+    it('clears an error when a later reload succeeds', async () => {
+      const getOverview = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce(OVERVIEW);
+      render(<App api={fakeApi({ getOverview })} />);
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      await focus();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByText(/Snapshot 7/)).toBeInTheDocument();
+    });
   });
 });

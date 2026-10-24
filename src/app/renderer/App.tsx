@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Overview, VitalsApi } from '../shared/api.js';
 import { formatUtc, ipcErrorMessage } from './format';
 import { QueueView } from './views/QueueView';
@@ -21,13 +21,20 @@ export function App({ api }: { api: VitalsApi }) {
   const [error, setError] = useState<string | null>(null);
   const [repoFilter, setRepoFilter] = useState<number | null>(null);
 
+  const latestRequest = useRef(0);
+
   const reload = useCallback(() => {
+    const id = ++latestRequest.current;
     api.getOverview().then(
       (o) => {
+        if (id !== latestRequest.current) return;
         setOverview(o);
         setError(null);
       },
-      (err: unknown) => setError(ipcErrorMessage(err)),
+      (err: unknown) => {
+        if (id !== latestRequest.current) return;
+        setError(ipcErrorMessage(err));
+      },
     );
   }, [api]);
 
