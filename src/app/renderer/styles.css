@@ -6,12 +6,14 @@
   --border: color-mix(in srgb, CanvasText 20%, Canvas);
   --surface: color-mix(in srgb, CanvasText 4%, Canvas);
   --hover: color-mix(in srgb, CanvasText 9%, Canvas);
+  /* --accent is a fill under --accent-text; --accent-ink is text and lines on the page's own background. */
   --accent: #0a5bc4;
   --accent-text: #fff;
+  --accent-ink: #0a5bc4;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root { --accent: #3d7fe0; }
+  :root { --accent: #2563eb; --accent-ink: #8ab4f8; }
 }
 
 button, input, select { font: inherit; }
@@ -53,7 +55,7 @@ h2 { margin: 16px 0 12px; font-size: 1.4rem; }
   border: 1px solid currentColor;
   border-radius: 4px;
 }
-header > [role='alert'], .app > [role='alert'] { margin: 8px 24px 0; }
+.app > [role='alert'] { margin: 8px 24px 0; }
 
 /* Queue: it fills main, and its list and side panel scroll on their own. */
 .queue { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -92,7 +94,7 @@ header > [role='alert'], .app > [role='alert'] { margin: 8px 24px 0; }
   gap: 16px;
 }
 .finding-scroll { min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
-.finding-scroll:focus-within { border-color: var(--accent); }
+.finding-scroll:focus-within { border-color: var(--accent-ink); }
 .finding-list:focus { outline: none; }
 .finding-row {
   display: flex;
@@ -119,7 +121,16 @@ header > [role='alert'], .app > [role='alert'] { margin: 8px 24px 0; }
 .side-panel dt { font-weight: 600; }
 .side-panel dd { margin: 0; }
 /* The actions stay in sight however long the details are. */
-.side-panel .actions { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center; padding: 8px 0; background: Canvas; }
+.side-panel .actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  background: Canvas;
+}
 
 /* Repos */
 .repo-cards {
@@ -149,9 +160,9 @@ header > [role='alert'], .app > [role='alert'] { margin: 8px 24px 0; }
 .repo-card .counts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .repo-card .age, .repo-card .status { color: var(--muted); }
 button.repo-card { cursor: pointer; background: var(--surface); box-shadow: 0 1px 2px color-mix(in srgb, CanvasText 15%, transparent); }
-button.repo-card .name { color: var(--accent); }
-button.repo-card:hover { border-color: var(--accent); background: var(--hover); }
-button.repo-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.repo-card .name { color: var(--accent-ink); }
+button.repo-card:hover { border-color: var(--accent-ink); background: var(--hover); }
+button.repo-card:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 
 /* Tables: the treatment plan and reports */
 table { border-collapse: collapse; margin: 8px 0 16px; }
