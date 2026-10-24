@@ -10,6 +10,14 @@ describe('Markdown', () => {
     expect(container.querySelector('td')).toHaveTextContent('1');
   });
 
+  it('aligns table columns with classes, since the CSP blocks inline styles', () => {
+    const { container } = render(<Markdown source={'| a | b | c | d |\n|---|:---|:---:|---:|\n| 1 | 2 | 3 | 4 |\n'} />);
+    expect(container.querySelector('[style]')).toBeNull();
+    const classes = (selector: string) => [...container.querySelectorAll(selector)].map((cell) => cell.getAttribute('class'));
+    expect(classes('th')).toEqual([null, 'align-left', 'align-center', 'align-right']);
+    expect(classes('td')).toEqual([null, 'align-left', 'align-center', 'align-right']);
+  });
+
   it('never produces script, images, links, or raw HTML', () => {
     const source = [
       '<script>window.x=1</script>',

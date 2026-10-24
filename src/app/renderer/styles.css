@@ -154,6 +154,10 @@ button.repo-card:focus-visible { outline: 2px solid var(--accent); outline-offse
 table { border-collapse: collapse; margin: 8px 0 16px; }
 th, td { padding: 4px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 th { font-weight: 600; }
+/* Report table alignment (Markdown.tsx sets these classes in place of inline styles). */
+.report .align-left { text-align: left; }
+.report .align-center { text-align: center; }
+.report .align-right { text-align: right; }
 
 /* Reports */
 .report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }

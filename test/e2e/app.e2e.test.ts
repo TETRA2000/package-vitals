@@ -53,6 +53,8 @@ let home: string | undefined;
 let snapshotId: number;
 let app: ElectronApplication;
 let page: Page;
+/** Every error the page logs, such as a CSP violation. */
+const consoleErrors: string[] = [];
 
 beforeAll(async () => {
   home = mkdtempSync(path.join(tmpdir(), 'package-vitals-e2e-'));
@@ -79,6 +81,9 @@ beforeAll(async () => {
     chromiumSandbox: true,
   });
   page = await app.firstWindow();
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
   // The seeded snapshot has loaded once the queue shows its findings.
   await page.getByRole('listbox', { name: 'Findings' }).waitFor();
 });
@@ -183,6 +188,9 @@ describe('the built app', () => {
     expect(text).toContain(HOSTILE_ERROR);
     expect(await report.locator('a').count()).toBe(0);
     expect(await report.locator('img').count()).toBe(0);
+    // The report's tables have aligned columns; inline alignment styles would each log a CSP error.
+    expect(await report.locator('td.align-right').count()).toBeGreaterThan(0);
+    expect(consoleErrors).toEqual([]);
   });
 
   // Last on purpose: main cancels the navigation without telling DevTools, so Playwright keeps it pending
