@@ -51,12 +51,8 @@ const VITALS_KEYS = [
 
 let home: string | undefined;
 let snapshotId: number;
-let app: ElectronApplication;
-let page: Page;
-/** Every error the page logs, such as a CSP violation. */
-const consoleErrors: string[] = [];
 
-beforeAll(async () => {
+beforeAll(() => {
   home = mkdtempSync(path.join(tmpdir(), 'package-vitals-e2e-'));
   const db = openDatabase(dataPaths(home).db);
   try {
@@ -71,8 +67,15 @@ beforeAll(async () => {
   } finally {
     db.close();
   }
+});
 
-  app = await _electron.launch({
+afterAll(() => {
+  if (home !== undefined) rmSync(home, { recursive: true, force: true });
+});
+
+/** Launches the built app on the seeded home and waits for the seeded snapshot's findings. */
+async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
+  const app = await _electron.launch({
     args: ['.'],
     cwd: REPO_ROOT,
     // process.env never holds undefined values at runtime; its type just allows them.
@@ -80,23 +83,30 @@ beforeAll(async () => {
     // On Linux, Playwright passes --no-sandbox unless this is set. The test runs the app as shipped.
     chromiumSandbox: true,
   });
-  page = await app.firstWindow();
-  page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
-  });
-  // The seeded snapshot has loaded once the queue shows its findings.
-  await page.getByRole('listbox', { name: 'Findings' }).waitFor();
-});
+  const page = await app.firstWindow();
+  return { app, page };
+}
 
-afterAll(async () => {
-  try {
-    await app?.close();
-  } finally {
-    if (home !== undefined) rmSync(home, { recursive: true, force: true });
-  }
-});
-
+// One app and one page for the whole block: the tests are one sequential session, and each starts where the
+// last one left off (the selection test, for one, leaves a finding selected).
 describe('the built app', () => {
+  let app: ElectronApplication;
+  let page: Page;
+  /** Every error the page logs, such as a CSP violation. */
+  const consoleErrors: string[] = [];
+
+  beforeAll(async () => {
+    ({ app, page } = await launch());
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+    await page.getByRole('listbox', { name: 'Findings' }).waitFor();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
   it('the window is sandboxed and isolated', async () => {
     const prefs = await app.evaluate(({ BrowserWindow }) => {
       const windows = BrowserWindow.getAllWindows();
@@ -192,9 +202,23 @@ describe('the built app', () => {
     expect(await report.locator('td.align-right').count()).toBeGreaterThan(0);
     expect(consoleErrors).toEqual([]);
   });
+});
 
-  // Last on purpose: main cancels the navigation without telling DevTools, so Playwright keeps it pending
-  // and every later locator action would wait for it to finish.
+// Its own app and page: main cancels the navigation without telling DevTools, so Playwright keeps it pending and
+// any later locator action on that page would wait for it to finish.
+describe('the built app, asked to leave', () => {
+  let app: ElectronApplication;
+  let page: Page;
+
+  beforeAll(async () => {
+    ({ app, page } = await launch());
+    await page.getByRole('listbox', { name: 'Findings' }).waitFor();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
   it('nothing reaches the network or leaves the app', async () => {
     expect(await page.evaluate((url) => fetch(url).then(() => 'reached', () => 'blocked'), OUTSIDE_URL)).toBe('blocked');
 
@@ -216,7 +240,7 @@ describe('the built app', () => {
       window.location.href = url;
     }, OUTSIDE_URL);
     await expect
-      .poll(() => app.evaluate(() => (globalThis as { attemptedNavigations?: string[] }).attemptedNavigations))
+      .poll(() => app.evaluate(() => (globalThis as { attemptedNavigations?: string[] }).attemptedNavigations), { timeout: 2_000 })
       .toEqual([OUTSIDE_URL]);
     expect(await navigated).toBe(false);
     expect(page.url()).toBe(APP_URL);
