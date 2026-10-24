@@ -5,6 +5,14 @@ export const CONTENT_SECURITY_POLICY =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
   "connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
+/**
+ * The copy in index.html's meta tag. A meta tag can't deliver `frame-ancestors` (Chromium logs an error
+ * on every load), so it is left to the header.
+ */
+export const META_CONTENT_SECURITY_POLICY = CONTENT_SECURITY_POLICY.split('; ')
+  .filter((directive) => !directive.startsWith('frame-ancestors '))
+  .join('; ');
+
 const APP_SCHEME = 'app:';
 const APP_HOST = 'vitals';
 

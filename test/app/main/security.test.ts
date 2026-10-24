@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   CONTENT_SECURITY_POLICY,
+  META_CONTENT_SECURITY_POLICY,
   hardenSession,
   hardenWebContents,
   isAllowedRequestUrl,
@@ -40,7 +41,14 @@ describe('security', () => {
       expect(CONTENT_SECURITY_POLICY).toContain(directive);
     }
     expect(CONTENT_SECURITY_POLICY).not.toMatch(/unsafe-(inline|eval)/);
-    expect(readFileSync(INDEX_HTML, 'utf8')).toContain(`content="${CONTENT_SECURITY_POLICY}"`);
+  });
+
+  it('repeats the CSP in the meta tag without frame-ancestors, which a meta tag cannot deliver', () => {
+    const directives = (csp: string) => csp.split(';').map((d) => d.trim());
+    expect(directives(META_CONTENT_SECURITY_POLICY))
+      .toEqual(directives(CONTENT_SECURITY_POLICY).filter((d) => !d.startsWith('frame-ancestors')));
+    expect(META_CONTENT_SECURITY_POLICY).not.toContain('frame-ancestors');
+    expect(readFileSync(INDEX_HTML, 'utf8')).toContain(`content="${META_CONTENT_SECURITY_POLICY}"`);
   });
 
   it('isAppUrl accepts only app://vitals', () => {
