@@ -52,5 +52,8 @@ npm run build         # the end-to-end test runs the built app
 npm run test:e2e      # launches the app with Playwright and checks its security settings
 ```
 
-The end-to-end test needs Electron's binary, which Electron downloads the first time it runs (`npx install-electron`
-fetches it ahead of time). On Linux it needs a display, so run it as `xvfb-run -a npm run test:e2e`.
+The end-to-end test needs Electron's binary, which Electron downloads the first time it runs
+(`npx --no install-electron` fetches it ahead of time; `--no` stops npx from downloading a registry package of that
+name). On Linux it needs a display, so run it as `xvfb-run -a npm run test:e2e`. Where AppArmor restricts unprivileged
+user namespaces, as on Ubuntu 24.04, Chromium's sandbox can't start until you allow them with
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`.
