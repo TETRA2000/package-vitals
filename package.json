@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
   },
   "devDependencies": {
+    "@tanstack/react-virtual": "^3.14.22",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
