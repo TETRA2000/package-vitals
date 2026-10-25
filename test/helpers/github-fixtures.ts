@@ -81,3 +81,29 @@ export function sbomJson(
     },
   };
 }
+
+/** A recursive tree as `GET /repos/{owner}/{repo}/git/trees/HEAD?recursive=1` returns it. Entries are blobs unless typed. */
+export function treeJson(
+  entries: { path: string; sha: string; type?: 'blob' | 'tree'; size?: number }[],
+  o: { truncated?: boolean } = {},
+) {
+  return {
+    sha: 'f'.repeat(40),
+    url: 'https://api.github.com/repos/o/r/git/trees/HEAD',
+    tree: entries.map(({ path, sha, type = 'blob', size }) => ({
+      path,
+      mode: type === 'tree' ? '040000' : '100644',
+      type,
+      sha,
+      ...(size === undefined ? {} : { size }),
+    })),
+    truncated: o.truncated ?? false,
+  };
+}
+
+/** A blob as `GET /repos/{owner}/{repo}/git/blobs/{sha}` returns it: base64, with a line break after every 60 characters. */
+export function blobJson(text: string) {
+  const bytes = Buffer.from(text, 'utf8');
+  const lines = bytes.toString('base64').match(/.{1,60}/g) ?? [];
+  return { size: bytes.length, encoding: 'base64', content: lines.map((line) => `${line}\n`).join('') };
+}

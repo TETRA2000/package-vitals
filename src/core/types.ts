@@ -18,6 +18,9 @@ export interface RepoInfo {
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
+/** Where a severity came from: the advisory itself, a malicious-package record, or assumed for want of either. */
+export type SeveritySource = 'advisory' | 'malware' | 'assumed';
+
 export type AlertState = 'open' | 'dismissed' | 'auto_dismissed' | 'fixed';
 
 export interface DependabotAlert {
@@ -137,4 +140,45 @@ export interface ReportEntry {
   repoFullName: string | null;
   fileName: string;
   createdAt: string;
+}
+
+/** Package ecosystems the Checkup reads lockfiles for, named as Dependabot names them. */
+export type PackageEcosystem = 'npm' | 'rubygems';
+
+export interface ChainLink {
+  name: string;
+  version: string;
+}
+
+/** From a project root (`root` is its label) down to the vulnerable package, which is the last link. */
+export interface DependencyChain {
+  root: string;
+  links: ChainLink[];
+  dev: boolean;
+}
+
+export type Relationship = 'direct' | 'transitive' | 'mixed';
+
+/** A direct dependency to move to a newer release, so that a vulnerable package it brings in goes away. */
+export interface Upgrade {
+  name: string;
+  from: string;
+  to: string;
+}
+
+export type FindingSource = 'dependabot' | 'osv' | 'both';
+
+/** One open Dependabot alert, or one OSV advisory no alert accounts for, in one repo's project. */
+export interface FindingRecord {
+  alertNumber: number | null; source: FindingSource;
+  ecosystem: string; packageName: string; manifestPath: string;
+  advisoryId: string; cveId: string | null; severity: Severity; severitySource: SeveritySource;
+  summary: string; vulnerableRange: string | null; firstPatched: string | null;
+  createdAt: string | null;           // null: first seen in this snapshot (the store fills it in)
+  scope: 'runtime' | 'development' | null; githubRelationship: string | null;
+  installedVersions: string[]; relationship: Relationship | null;
+  chains: DependencyChain[]; chainCount: number;
+  lockfileRead: boolean; lockfileDevOnly: boolean | null; jsBundler: string | null;
+  tier: 'not_shipped' | null;
+  upgrades: Upgrade[] | null;         // filled in by the Checkup (Task 12)
 }
