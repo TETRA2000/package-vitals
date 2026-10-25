@@ -58,7 +58,7 @@ It builds on Plans 1 and 2 (`docs/superpowers/plans/2026-10-24-package-vitals-{1
      - When no lockfile was read, Dependabot's `development` scope is enough, except for npm.
   3. For npm, the project's lockfile was read and no JS bundler was detected.
   4. The finding is npm or RubyGems. Spec Section 5 says findings in other ecosystems "stay not triaged" in this version.
-- **JS bundler detection** follows the spec's list, plus `react-scripts`, `@vue/cli-service`, `@angular-devkit/build-angular`, `browserify`, `@rspack/core`, and `tsup`. It looks at dependencies, config files, and scripts in the project and its workspaces. Uncertainty (too many `package.json` files to read) counts as a bundler.
+- **JS bundler detection** follows the spec's list, plus `react-scripts`, `@vue/cli-service`, `@angular-devkit/build-angular`, `browserify`, `@rspack/core`, and `tsup`, and (added in Task 7's review) Metro/Expo/React Native, Rsbuild, `@vercel/ncc`, Docusaurus, VitePress, tsdown, rolldown, Snowpack, and Parcel 2. It looks at dependencies, config files, and scripts in the project and its workspaces. Uncertainty (too many `package.json` files to read, a truncated tree, an unreadable `package.json`, or a workspace pattern too costly to match) counts as a bundler. A repo with more than 50 lockfiles isn't read at all and shows in a notice.
 - **Outdated dependencies:** a direct dependency (prod or dev) whose locked version is older than the registry's latest release: npm's `latest` dist-tag, or RubyGems' `latest.json`.
   - It is counted per repo, once per ecosystem and name.
   - Git, path, and link dependencies are skipped.
@@ -495,6 +495,7 @@ export function parseNpmLock(text: string, packageJson: PackageJson | null): Par
 ```ts
 export const MAX_LOCKFILE_BYTES = 20 * 1024 * 1024;
 export const MAX_PACKAGE_JSONS = 50;
+export const MAX_LOCKFILES_PER_REPO = 50;   // more → status 'error', "More than 50 lockfiles; this repo's lockfiles weren't read.", no blob requests
 export interface TreeEntry { path: string; type: string; sha: string; size?: number }
 export interface LockfileCandidate { path: string; ecosystem: PackageEcosystem; kind: 'npm' | 'yarn' | 'pnpm' | 'bundler'; sha: string; size: number }
 export interface ProjectScan { path: string; ecosystem: PackageEcosystem; blobSha: string; result: ParseResult; jsBundler: string | null }
@@ -524,9 +525,10 @@ export async function scanRepoLockfiles(client: GitHubClient, fullName: string):
     - A `!pattern` excludes.
     - The result is `package.json` paths under `projectDir`, never under `node_modules`.
   - **`detectJsBundler`** returns the first match, as `<tool> (dependency)`, `<tool> (config file <basename>)`, or `<tool> (script "<name>")`. It returns null for Ruby projects and when nothing matches.
-    - Dependencies, in any of the four maps: `vite`, `webpack`, `rollup`, `esbuild`, `parcel`, `parcel-bundler`, `next`, `nuxt`, `@sveltejs/kit`, `@remix-run/dev`, `astro`, `gatsby`, `react-scripts`, `@vue/cli-service`, `@angular-devkit/build-angular`, `browserify`, `@rspack/core`, `tsup`.
-    - Config files: basenames anywhere under `projectDir` (not in `node_modules`) matching `/^(vite|webpack|rollup|next|nuxt|svelte|remix|astro|rspack|tsup|esbuild)\.config\.[cm]?[jt]s$|^gatsby-config\.[cm]?[jt]s$|^\.parcelrc$/`.
-    - Scripts: any value matching `/(^|[^\w-])(vite|webpack|rollup|esbuild|parcel|next|nuxt|nuxi|svelte-kit|remix|astro|gatsby|react-scripts|vue-cli-service|browserify|rspack|tsup)([^\w-]|$)|(^|[^\w-])ng\s+build\b/`.
+    - Dependencies, in any of the four maps: `vite`, `webpack`, `rollup`, `esbuild`, `parcel`, `parcel-bundler`, `next`, `nuxt`, `@sveltejs/kit`, `@remix-run/dev`, `astro`, `gatsby`, `react-scripts`, `@vue/cli-service`, `@angular-devkit/build-angular`, `browserify`, `@rspack/core`, `tsup`, `expo`, `react-native`, `metro`, `@rsbuild/core`, `@vercel/ncc`, `@docusaurus/core`, `vitepress`, `tsdown`, `rolldown`, `snowpack`, `@parcel/core`.
+    - Config files: basenames anywhere under `projectDir` (not in `node_modules`) matching `/^(vite|webpack|rollup|next|nuxt|svelte|remix|astro|rspack|tsup|esbuild|metro|rsbuild|docusaurus|tsdown|rolldown)\.config\.[cm]?[jt]s$|^gatsby-config\.[cm]?[jt]s$|^\.parcelrc$/`, plus any path ending in `.vitepress/config.[cm]?[jt]s`.
+    - Scripts: any value matching `/(^|[^\w-])(vite|webpack|rollup|esbuild|parcel|next|nuxt|nuxi|svelte-kit|remix|astro|gatsby|react-scripts|vue-cli-service|browserify|rspack|tsup|expo|react-native|metro|rsbuild|ncc|docusaurus|vitepress|tsdown|rolldown|snowpack)([^\w-]|$)|(^|[^\w-])ng\s+build\b/`.
+  - **Workspace globs** run on a step budget (`MAX_GLOB_STEPS`); running out means `unknown (a workspace pattern isn't supported)`.
 
 - [ ] **Step 1: Write the failing tests**
   - `finds lockfiles and skips node_modules and vendor`:
