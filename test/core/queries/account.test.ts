@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { openDatabase, type Db } from '../../../src/core/db/database.js';
-import { alertStateCounts, criticalTreatmentPlan, monitoringSummary, openAlertAges, openSeverityCounts, worstRepos }
+import { alertStateCounts, criticalTreatmentPlan, monitoringSummary, openAlertAges, openSeverityCounts, repoCards, worstRepos }
   from '../../../src/core/queries/account.js';
 import { seedSnapshot } from '../../helpers/seed.js';
 
@@ -107,5 +107,33 @@ describe('account queries', () => {
     const id = seedSnapshot(db, { repos: [] });
     expect(openAlertAges(db, id, new Date('2026-10-24T00:00:00Z')).map((r) => [r.bucket, r.all])).toEqual([
       ['under-30-days', 0], ['30-90-days', 0], ['90-365-days', 0], ['1-2-years', 0], ['over-2-years', 0]]);
+  });
+
+  it('repoCards puts the worst repos first, then repos without data, then clean repos', () => {
+    db = openDatabase(':memory:');
+    const id = seedSnapshot(db, { repos: [
+      { name: 'e' },
+      { name: 'd', alertsStatus: 'not_monitored' },
+      { name: 'c', alertsStatus: 'error', alertsError: 'Bad Gateway (HTTP 502)' },
+      { name: 'b', alerts: [{ severity: 'high' }, { severity: 'high' }] },
+      { name: 'a', alerts: [{ severity: 'critical', createdAt: '2022-02-02T00:00:00Z' }, { severity: 'critical', state: 'fixed' }] },
+    ] });
+    const cards = repoCards(db, id);
+    expect(cards.map((c) => c.fullName)).toEqual(['a', 'b', 'c', 'd', 'e'].map((n) => `TETRA2000/${n}`));
+    expect(cards[0]).toMatchObject({ repoId: repoId('a'), status: 'ok', error: null, critical: 1, high: 0, open: 1,
+      oldestOpenAlert: '2022-02-02T00:00:00Z' });
+    expect(cards[1]).toMatchObject({ critical: 0, high: 2, open: 2 });
+    expect(cards[2]).toMatchObject({ status: 'error', error: 'Bad Gateway (HTTP 502)', open: 0, oldestOpenAlert: null });
+    expect(cards[3]).toMatchObject({ status: 'not_monitored', error: null });
+    expect(cards[4]).toMatchObject({ status: 'ok', open: 0, critical: 0, high: 0 });
+  });
+
+  it('criticalTreatmentPlan returns every row without a limit', () => {
+    db = openDatabase(':memory:');
+    const id = seedSnapshot(db, { repos: [{ name: 'a', alerts: [
+      { severity: 'critical', packageName: 'p1' }, { severity: 'critical', packageName: 'p2' },
+      { severity: 'critical', packageName: 'p3' }] }] });
+    expect(criticalTreatmentPlan(db, id)).toHaveLength(3);
+    expect(criticalTreatmentPlan(db, id, 2)).toHaveLength(2);
   });
 });

@@ -5,7 +5,7 @@ import { fetchRepoAlerts } from '../github/alerts.js';
 import { fetchRepoSbom } from '../github/sbom.js';
 import { mapLimit } from '../concurrency.js';
 import { createSnapshot, finishSnapshot, recordRepoResult, upsertRepo } from './store.js';
-import type { AlertsResult, CheckupScope, Owner, SbomResult, SeverityCounts } from '../types.js';
+import type { AlertsResult, CheckupScope, CheckupSummary, Owner, SbomResult, SeverityCounts } from '../types.js';
 
 export interface CheckupDeps {
   db: Db;
@@ -17,14 +17,6 @@ export interface CheckupDeps {
 export interface CheckupOptions extends CheckupScope {
   owner: Owner;
   concurrency: number;
-}
-
-export interface CheckupSummary {
-  snapshotId: number;
-  reposChecked: number;
-  notMonitored: number;
-  errors: number;
-  open: SeverityCounts;
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { Db } from '../db/database.js';
-import type { SeverityCounts } from '../types.js';
+import type { MonitoringSummary, RepoCard, SeverityCounts, TreatmentRow } from '../types.js';
 
 export function openSeverityCounts(db: Db, snapshotId: number, repoId?: number): SeverityCounts {
   const rows = (repoId === undefined
@@ -55,14 +55,6 @@ export function alertStateCounts(db: Db, snapshotId: number): StateCounts {
   return { open: n('open'), dismissed: n('dismissed'), autoDismissed: n('auto_dismissed'), fixed: n('fixed') };
 }
 
-export interface MonitoringSummary {
-  checked: number;
-  monitored: number;
-  notMonitored: string[];
-  errors: { repo: string; message: string }[];
-  withOpenAlerts: number;
-}
-
 export function monitoringSummary(db: Db, snapshotId: number): MonitoringSummary {
   const repos = db.prepare(`SELECT r.full_name AS fullName, s.alerts_status AS status, s.alerts_error AS error
     FROM snapshot_repos s JOIN repos r ON r.id = s.repo_id WHERE s.snapshot_id = ? ORDER BY r.full_name`)
@@ -100,28 +92,43 @@ export function worstRepos(db: Db, snapshotId: number, limit: number): WorstRepo
     LIMIT ?`).all(snapshotId, limit).map((r) => ({ ...(r as unknown as WorstRepo) }));
 }
 
-export interface TreatmentRow {
-  ecosystem: string;
-  packageName: string;
-  repoCount: number;
-  patchedVersions: string[];
-}
-
-/** Packages with an open critical alert, by how many repos they affect. */
-export function criticalTreatmentPlan(db: Db, snapshotId: number, limit: number): TreatmentRow[] {
+/** Packages with an open critical alert, by how many repos they affect. Every row when `limit` is omitted. */
+export function criticalTreatmentPlan(db: Db, snapshotId: number, limit?: number): TreatmentRow[] {
   const rows = db.prepare(`SELECT ecosystem, package_name AS packageName, count(DISTINCT repo_id) AS repoCount,
       json_group_array(DISTINCT first_patched) FILTER (WHERE first_patched IS NOT NULL) AS patched
     FROM alerts
     WHERE snapshot_id = ? AND state = 'open' AND severity = 'critical'
     GROUP BY ecosystem, package_name
     ORDER BY repoCount DESC, packageName ASC, ecosystem ASC
-    LIMIT ?`).all(snapshotId, limit) as { ecosystem: string; packageName: string; repoCount: number; patched: string }[];
+    LIMIT ?`).all(snapshotId, limit ?? -1) as { ecosystem: string; packageName: string; repoCount: number; patched: string }[];
   return rows.map((r) => ({
     ecosystem: r.ecosystem,
     packageName: r.packageName,
     repoCount: r.repoCount,
     patchedVersions: (JSON.parse(r.patched) as string[]).sort((a, b) => a.localeCompare(b, 'en', { numeric: true })),
   }));
+}
+
+/**
+ * Every repo in the snapshot with its open-alert counts. Repos with open alerts
+ * come first, worst first; then repos that errored, then ones that aren't
+ * monitored, then monitored repos with nothing open.
+ */
+export function repoCards(db: Db, snapshotId: number): RepoCard[] {
+  return db.prepare(`SELECT s.repo_id AS repoId, r.full_name AS fullName, s.alerts_status AS status,
+      s.alerts_error AS error,
+      count(a.number) FILTER (WHERE a.severity = 'critical') AS critical,
+      count(a.number) FILTER (WHERE a.severity = 'high') AS high,
+      count(a.number) AS open,
+      min(a.created_at) AS oldestOpenAlert
+    FROM snapshot_repos s JOIN repos r ON r.id = s.repo_id
+    LEFT JOIN alerts a ON a.snapshot_id = s.snapshot_id AND a.repo_id = s.repo_id AND a.state = 'open'
+    WHERE s.snapshot_id = ?
+    GROUP BY s.repo_id
+    ORDER BY (count(a.number) = 0),
+      CASE WHEN count(a.number) > 0 THEN 0 WHEN s.alerts_status = 'error' THEN 1 WHEN s.alerts_status = 'not_monitored' THEN 2 ELSE 3 END,
+      critical DESC, high DESC, open DESC, fullName ASC`)
+    .all(snapshotId).map((r) => ({ ...(r as unknown as RepoCard) }));
 }
 
 export type AgeBucket = 'under-30-days' | '30-90-days' | '90-365-days' | '1-2-years' | 'over-2-years';

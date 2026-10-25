@@ -61,3 +61,80 @@ export interface SeverityCounts {
   medium: number;
   low: number;
 }
+
+export interface MonitoringSummary {
+  checked: number;
+  monitored: number;
+  notMonitored: string[];
+  errors: { repo: string; message: string }[];
+  withOpenAlerts: number;
+}
+
+export interface TreatmentRow {
+  ecosystem: string;
+  packageName: string;
+  repoCount: number;
+  patchedVersions: string[];
+}
+
+export interface CheckupSummary {
+  snapshotId: number;
+  reposChecked: number;
+  notMonitored: number;
+  errors: number;
+  open: SeverityCounts;
+}
+
+export interface FindingKey {
+  snapshotId: number;
+  repoId: number;
+  number: number;
+}
+
+export interface FindingFilter {
+  severities: Severity[];
+  repoId: number | null;
+  ecosystem: string | null;
+}
+
+export type TriageState = 'not_triaged'; // Plans 3-5 add the others
+
+export interface FindingRow extends FindingKey {
+  fullName: string;
+  severity: Severity;
+  ecosystem: string;
+  packageName: string;
+  ghsaId: string;
+  summary: string;
+  manifestPath: string;
+  createdAt: string;
+  triage: TriageState;
+}
+
+export interface FindingDetail extends FindingRow {
+  cveId: string | null;
+  scope: 'runtime' | 'development' | null;
+  relationship: string | null;
+  vulnerableRange: string | null;
+  firstPatched: string | null;
+}
+
+export interface RepoCard {
+  repoId: number;
+  fullName: string;
+  status: 'ok' | 'not_monitored' | 'error';
+  error: string | null;
+  critical: number;
+  high: number;
+  open: number;
+  oldestOpenAlert: string | null;
+}
+
+export interface ReportEntry {
+  id: number;
+  kind: 'account' | 'repo';
+  snapshotId: number;
+  repoFullName: string | null;
+  fileName: string;
+  createdAt: string;
+}

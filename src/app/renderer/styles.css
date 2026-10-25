@@ -1,0 +1,180 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  --muted: color-mix(in srgb, CanvasText 65%, Canvas);
+  --border: color-mix(in srgb, CanvasText 20%, Canvas);
+  --surface: color-mix(in srgb, CanvasText 4%, Canvas);
+  --hover: color-mix(in srgb, CanvasText 9%, Canvas);
+  /* --accent is a fill under --accent-text; --accent-ink is text and lines on the page's own background. */
+  --accent: #0a5bc4;
+  --accent-text: #fff;
+  --accent-ink: #0a5bc4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { --accent: #2563eb; --accent-ink: #8ab4f8; }
+}
+
+button, input, select { font: inherit; }
+
+/* The window is the app: only main (or the queue's own panes) scrolls, so the header never leaves the screen. */
+html, body, #root { height: 100%; }
+body { margin: 0; }
+.app { height: 100%; display: flex; flex-direction: column; }
+
+header {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+nav { display: flex; gap: 4px; margin-right: auto; }
+nav button { padding: 6px 12px; border: 0; border-radius: 6px; background: none; color: inherit; cursor: pointer; }
+nav button:hover { background: var(--hover); }
+nav button[aria-current='page'] { background: var(--hover); font-weight: 600; }
+
+.snapshot { margin: 0; color: var(--muted); }
+
+.checkup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.checkup p { margin: 0; }
+.checkup button { padding: 6px 14px; border: 0; border-radius: 6px; background: var(--accent); color: var(--accent-text); cursor: pointer; }
+.checkup button:disabled { opacity: 0.6; cursor: default; }
+
+main { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; padding: 0 24px 16px; }
+main > p { margin: 16px 0; }
+h2 { margin: 16px 0 12px; font-size: 1.4rem; }
+
+[role='alert'] {
+  padding: 8px 12px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+}
+.app > [role='alert'] { margin: 8px 24px 0; }
+
+/* Queue: it fills main, and its list and side panel scroll on their own. */
+.queue { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.notices { margin-bottom: 8px; }
+.notices details { margin-bottom: 4px; }
+.notices summary { cursor: pointer; }
+/* Open, the names fill a short box that scrolls, so the queue keeps its room. */
+.notices ul {
+  max-height: 7.5rem;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 2px 16px;
+  list-style: none;
+  margin: 4px 0 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; margin-bottom: 12px; }
+.filters fieldset { display: flex; align-items: center; gap: 12px; border: 0; padding: 0; margin: 0; }
+.filters legend { float: left; margin-right: 4px; font-weight: 600; }
+.filters fieldset label { display: inline-flex; align-items: center; gap: 4px; }
+.filters > label, .report-actions label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.filters select, .report-actions select { font-weight: normal; }
+
+.summary-strip { display: flex; flex-wrap: wrap; gap: 8px 20px; list-style: none; padding: 0; margin: 0 0 12px; font-weight: 600; }
+
+.queue-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) min(360px, 35%);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px;
+}
+.finding-scroll { min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.finding-scroll:focus-within { border-color: var(--accent-ink); }
+.finding-list:focus { outline: none; }
+.finding-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--surface);
+  white-space: nowrap;
+  cursor: default;
+}
+.finding-row:hover { background: var(--hover); }
+.finding-row[aria-selected='true'] { background: var(--accent); color: var(--accent-text); }
+/* In a narrow window the summary gives way first, then the package and repo; severity and age always show. */
+.finding-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.finding-row .severity { flex: none; width: 4.5em; font-weight: 600; }
+.finding-row .summary { flex: 1 1 0; }
+.finding-row .age { flex: none; }
+
+.side-panel { min-height: 0; overflow: auto; overflow-wrap: anywhere; padding: 0 4px; }
+.side-panel h3 { margin: 4px 0 8px; }
+.side-panel p { margin: 0 0 8px; }
+.side-panel dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 12px 0; }
+.side-panel dt { font-weight: 600; }
+.side-panel dd { margin: 0; }
+/* The actions stay in sight however long the details are. */
+.side-panel .actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  background: Canvas;
+}
+
+/* Repos */
+.repo-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 12px;
+}
+.repo-cards li { display: flex; }
+.repo-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.repo-card .counts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.repo-card .age, .repo-card .status { color: var(--muted); }
+button.repo-card { cursor: pointer; background: var(--surface); box-shadow: 0 1px 2px color-mix(in srgb, CanvasText 15%, transparent); }
+button.repo-card .name { color: var(--accent-ink); }
+button.repo-card:hover { border-color: var(--accent-ink); background: var(--hover); }
+button.repo-card:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+
+/* Tables: the treatment plan and reports */
+table { border-collapse: collapse; margin: 8px 0 16px; }
+th, td { padding: 4px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { font-weight: 600; }
+/* Report table alignment (Markdown.tsx sets these classes in place of inline styles). */
+.report .align-left { text-align: left; }
+.report .align-center { text-align: center; }
+.report .align-right { text-align: right; }
+
+/* Reports */
+.report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.report-list { list-style: none; padding: 0; margin: 0 0 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.report-list button[aria-pressed='true'] { font-weight: 600; }
+.report { max-width: 64rem; padding-top: 8px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
