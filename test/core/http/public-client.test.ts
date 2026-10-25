@@ -69,6 +69,52 @@ describe('PublicApiClient', () => {
     }
   });
 
+  it('never follows a redirect', async () => {
+    // The default fetch: the global fetch is asked for `redirect: 'manual'`, and its 307 fails at once.
+    const seen: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      seen.push({ url, init });
+      return new Response(null, { status: 307, headers: { location: 'http://evil.example/v1/querybatch' } });
+    });
+    try {
+      const sleep = vi.fn(async (_ms: number) => {});
+      const err = await new PublicApiClient({ origin: ORIGIN, sleep }).postJson('/v1/querybatch', { queries: [] }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(PublicApiError);
+      expect(err).toMatchObject({ status: 307, url: 'https://api.osv.dev/v1/querybatch', message: 'Temporary Redirect (HTTP 307)' });
+      expect(seen.map((s) => [s.url, s.init.method, s.init.redirect])).toEqual([['https://api.osv.dev/v1/querybatch', 'POST', 'manual']]);
+      expect(sleep).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    // Every 3xx fails after one request, without its body being read and without a request anywhere else.
+    for (const status of [301, 302, 303, 307, 308]) {
+      const sleep = vi.fn(async (_ms: number) => {});
+      const f = fakeHttp({ 'POST https://api.osv.dev/v1/querybatch': {
+        status, headers: { location: 'https://evil.example/v1/querybatch' }, body: { results: [{}] } } });
+      const err = (await client(f, sleep).postJson('/v1/querybatch', { queries: [] }).catch((e: unknown) => e)) as PublicApiError;
+      expect(err).toBeInstanceOf(PublicApiError);
+      expect(err.status).toBe(status);
+      expect(`${err} ${JSON.stringify(err)}`).not.toContain('results');
+      expect(f.calls.map((c) => c.url)).toEqual(['https://api.osv.dev/v1/querybatch']);
+      expect(sleep).not.toHaveBeenCalled();
+    }
+
+    // Some fetch implementations answer `manual` with an opaque redirect: status 0, no headers, no body.
+    const readBody = () => {
+      throw new Error('the body was read');
+    };
+    const opaque = { ok: false, status: 0, statusText: '', type: 'opaqueredirect', headers: new Headers(), body: null,
+      text: readBody, json: readBody } as unknown as Response;
+    let calls = 0;
+    const sleep = vi.fn(async (_ms: number) => {});
+    const c = new PublicApiClient({ origin: ORIGIN, fetch: async () => (calls++, opaque), sleep });
+    await expect(c.getText('/info/rack')).rejects.toMatchObject({ name: 'PublicApiError', status: 0, message: 'Request failed (HTTP 0)' });
+    await expect(c.getJson('/info/rack')).rejects.toMatchObject({ name: 'PublicApiError', status: 0 });
+    expect(calls).toBe(2);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it('posts JSON', async () => {
     const f = fakeHttp({ 'POST https://api.osv.dev/v1/querybatch': (body) => ({ body: { echo: body } }) });
     const sent = { queries: [{ package: { name: 'minimist', ecosystem: 'npm' }, version: '0.0.8' }] };

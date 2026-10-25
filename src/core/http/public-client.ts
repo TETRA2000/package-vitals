@@ -3,12 +3,13 @@ import { STATUS_CODES } from 'node:http';
 /**
  * A client for public, credential-free APIs (OSV, the npm registry, RubyGems),
  * pinned to one origin. It never sends an Authorization header; the GitHub
- * token lives only in GitHubClient.
+ * token lives only in GitHubClient. It never follows a redirect, which could
+ * send the request (and its body) elsewhere and read another origin's answer.
  */
 
 export type PublicFetch = (
   url: string,
-  init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: string },
+  init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: string; redirect: 'manual' },
 ) => Promise<Response>;
 
 /** An HTTP error from a public API. Its message never includes the response body. */
@@ -77,10 +78,12 @@ export class PublicApiClient {
     const url = this.#url(path);
     const headers: Record<string, string> = { 'User-Agent': 'package-vitals', Accept: accept };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
+    // `manual`: a redirect comes back as a response (a 3xx, or a status-0 opaque redirect) and fails below, unretried.
+    const init = body === undefined ? { method, headers, redirect: 'manual' as const } : { method, headers, body, redirect: 'manual' as const };
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {
-        response = await this.#fetch(url, body === undefined ? { method, headers } : { method, headers, body });
+        response = await this.#fetch(url, init);
       } catch (err) {
         // fetch rejects with a TypeError when the network drops, so back off and try again.
         if (!(err instanceof TypeError) || attempt >= this.#maxRetries) throw err;
@@ -98,7 +101,7 @@ export class PublicApiClient {
   }
 }
 
-/** Rate limiting and gateway errors that usually clear up on their own. Other errors fail at once. */
+/** Rate limiting and gateway errors that usually clear up on their own. Other errors, and every redirect, fail at once. */
 const RETRIED_STATUSES = new Set([429, 502, 503, 504]);
 
 /** 1 s, 4 s, 16 s, … */

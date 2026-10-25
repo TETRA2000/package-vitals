@@ -26,6 +26,7 @@ export function fakeHttp(routes: Record<string, FakeHttpRoute>): PublicFetch & {
   const calls: FakeHttpCall[] = [];
   const served = new Map<string, number>();
   const fetch: PublicFetch = async (url, init) => {
+    if (init.redirect !== 'manual') throw new Error(`fakeHttp: ${init.method} ${url} would follow redirects`);
     const body: unknown = init.body === undefined ? undefined : JSON.parse(init.body);
     calls.push({ url, method: init.method, headers: { ...init.headers }, body });
     const key = `${init.method} ${url}`;
