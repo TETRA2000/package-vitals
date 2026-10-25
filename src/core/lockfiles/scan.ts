@@ -13,11 +13,17 @@ import { parseYarnLock } from './yarn.js';
 
 export const MAX_LOCKFILE_BYTES = 20 * 1024 * 1024;
 export const MAX_PACKAGE_JSONS = 50;
+/** A repo with more lockfiles than this (fixture-heavy tooling repos) gets none read, so one repo can't use up the rate limit. */
+export const MAX_LOCKFILES_PER_REPO = 50;
+/** The matching work one project's workspace patterns may spend. Running out leaves its workspaces unknown. */
+export const MAX_GLOB_STEPS = 1_000_000;
 
 export interface TreeEntry { path: string; type: string; sha: string; size?: number }
 export interface LockfileCandidate { path: string; ecosystem: PackageEcosystem; kind: 'npm' | 'yarn' | 'pnpm' | 'bundler'; sha: string; size: number }
 export interface ProjectScan { path: string; ecosystem: PackageEcosystem; blobSha: string; result: ParseResult; jsBundler: string | null }
 export interface RepoLockfileScan { status: 'ok' | 'none' | 'empty' | 'error'; error: string | null; truncated: boolean; projects: ProjectScan[] }
+/** Steps left for workspace matching, spent as it goes: a character comparison or a `**` position is one step. */
+export interface GlobBudget { steps: number }
 
 interface TreeJson { tree?: TreeEntry[]; truncated?: boolean }
 
@@ -33,15 +39,17 @@ const SKIPPED_DIRS = new Set(['node_modules', 'vendor']);
 
 const BUNDLER_PACKAGES = ['vite', 'webpack', 'rollup', 'esbuild', 'parcel', 'parcel-bundler', 'next', 'nuxt',
   '@sveltejs/kit', '@remix-run/dev', 'astro', 'gatsby', 'react-scripts', '@vue/cli-service',
-  '@angular-devkit/build-angular', 'browserify', '@rspack/core', 'tsup'];
+  '@angular-devkit/build-angular', 'browserify', '@rspack/core', 'tsup', 'expo', 'react-native', 'metro', '@rsbuild/core',
+  '@vercel/ncc', '@docusaurus/core', 'vitepress', 'tsdown', 'rolldown', 'snowpack', '@parcel/core'];
 const DEPENDENCY_MAPS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
 const BUNDLER_CONFIG =
-  /^(vite|webpack|rollup|next|nuxt|svelte|remix|astro|rspack|tsup|esbuild)\.config\.[cm]?[jt]s$|^gatsby-config\.[cm]?[jt]s$|^\.parcelrc$/;
+  /^(vite|webpack|rollup|next|nuxt|svelte|remix|astro|rspack|tsup|esbuild|metro|rsbuild|docusaurus|tsdown|rolldown)\.config\.[cm]?[jt]s$|^gatsby-config\.[cm]?[jt]s$|^\.parcelrc$/;
+const VITEPRESS_CONFIG = /(^|\/)\.vitepress\/config\.[cm]?[jt]s$/;
 const BUNDLER_SCRIPT =
-  /(^|[^\w-])(vite|webpack|rollup|esbuild|parcel|next|nuxt|nuxi|svelte-kit|remix|astro|gatsby|react-scripts|vue-cli-service|browserify|rspack|tsup)([^\w-]|$)|(^|[^\w-])ng\s+build\b/;
+  /(^|[^\w-])(vite|webpack|rollup|esbuild|parcel|next|nuxt|nuxi|svelte-kit|remix|astro|gatsby|react-scripts|vue-cli-service|browserify|rspack|tsup|expo|react-native|metro|rsbuild|ncc|docusaurus|vitepress|tsdown|rolldown|snowpack)([^\w-]|$)|(^|[^\w-])ng\s+build\b/;
 /** Glob syntax workspacePackageJsonPaths reads literally, so a workspace it hides can't be ruled out. */
 const UNSUPPORTED_GLOB = /[?[\]{}()\\]/;
-// Matching costs patterns × paths, so a package.json with more or longer patterns than this isn't matched at all.
+// A package.json with more or longer patterns than this isn't matched at all. MAX_GLOB_STEPS bounds the matching itself.
 const MAX_WORKSPACE_PATTERNS = 100;
 const MAX_PATTERN_LENGTH = 1000;
 
@@ -91,13 +99,14 @@ export function findLockfiles(tree: TreeEntry[]): LockfileCandidate[] {
 
 // ---- workspace globs ----
 
-/** `*` matches any run of characters in one segment. Backtracks only to the last `*`, so it stays O(n·m). */
-function segmentMatches(pattern: string, segment: string): boolean {
+/** `*` matches any run of characters in one segment. Backtracks only to the last `*`; every step spends `budget`. */
+function segmentMatches(pattern: string, segment: string, budget: GlobBudget): boolean {
   let p = 0;
   let s = 0;
   let star = -1;
   let resume = 0;
   while (s < segment.length) {
+    if (--budget.steps < 0) return false;
     if (pattern[p] === '*') {
       star = p++;
       resume = s;
@@ -111,38 +120,52 @@ function segmentMatches(pattern: string, segment: string): boolean {
       return false;
     }
   }
-  while (pattern[p] === '*') p++;
+  for (; pattern[p] === '*'; p++) budget.steps--;
   return p === pattern.length;
 }
 
-/** Whether a pattern's segments match a path's, where `**` matches any number of segments. O(pattern × path). */
-function globMatches(pattern: string[], segments: string[]): boolean {
-  // reached[j]: the pattern so far matches the first j segments.
-  let reached = new Uint8Array(segments.length + 1);
-  reached[0] = 1;
+/**
+ * Whether a pattern's segments match a path's, where `**` matches any number of segments.
+ * Every call spends at least one step, so the budget bounds the work however many patterns and paths there are.
+ */
+function globMatches(pattern: string[], segments: string[], budget: GlobBudget): boolean {
+  // How many leading segments the pattern so far can match, in increasing order.
+  let reached = [0];
   for (const part of pattern) {
-    const next = new Uint8Array(segments.length + 1);
+    if (reached.length === 0 || budget.steps < 0) return false;
+    const next: number[] = [];
     if (part === '**') {
-      for (let j = 0, any = 0; j <= segments.length; j++) next[j] = any |= reached[j]!;
+      budget.steps -= segments.length - reached[0]! + 1;
+      for (let j = reached[0]!; j <= segments.length; j++) next.push(j);
     } else {
-      for (let j = 0; j < segments.length; j++) if (reached[j] && segmentMatches(part, segments[j]!)) next[j + 1] = 1;
+      for (const j of reached) if (j < segments.length && segmentMatches(part, segments[j]!, budget)) next.push(j + 1);
     }
     reached = next;
   }
-  return reached[segments.length] === 1;
+  return reached.at(-1) === segments.length;
 }
 
 const patternSegments = (pattern: string) => pattern.split('/').filter((s) => s !== '' && s !== '.');
 
-/** The `package.json` files of the workspaces the patterns name, under `projectDir` and never in node_modules. */
-export function workspacePackageJsonPaths(patterns: string[], treePaths: string[], projectDir: string): string[] {
+/**
+ * The `package.json` files of the workspaces the patterns name, under `projectDir` and never in node_modules.
+ * Matching spends `budget`. When it runs out, nothing is returned and `budget.steps` is negative.
+ */
+export function workspacePackageJsonPaths(
+  patterns: string[],
+  treePaths: string[],
+  projectDir: string,
+  budget: GlobBudget = { steps: MAX_GLOB_STEPS },
+): string[] {
   const include: string[][] = [];
   const exclude: string[][] = [];
   for (const pattern of new Set(patterns)) {
-    if (pattern.startsWith('!')) exclude.push(patternSegments(pattern.slice(1)));
-    else include.push(patternSegments(pattern));
+    const negated = pattern.startsWith('!');
+    const segments = patternSegments(negated ? pattern.slice(1) : pattern);
+    // A pattern with no segments names the project itself, never a workspace.
+    if (segments.length > 0) (negated ? exclude : include).push(segments);
   }
-  const matches = (dir: string[]) => (pattern: string[]) => globMatches(pattern, dir);
+  const matches = (dir: string[]) => (pattern: string[]) => globMatches(pattern, dir, budget);
   const found: string[] = [];
   for (const path of treePaths) {
     const rel = under(projectDir, path);
@@ -151,14 +174,23 @@ export function workspacePackageJsonPaths(patterns: string[], treePaths: string[
     // The project's own package.json is the root, not a workspace.
     if (dir.length === 0 || dir.includes('node_modules')) continue;
     if (include.some(matches(dir)) && !exclude.some(matches(dir))) found.push(path);
+    if (budget.steps < 0) return [];
   }
   return found.sort();
 }
 
 // ---- bundler detection ----
 
+/** A bundler config file's name as shown (VitePress's keeps its directory), or null when `rel` isn't one. */
+function configFileName(rel: string): string | null {
+  const name = basename(rel);
+  if (BUNDLER_CONFIG.test(name)) return name;
+  return name.startsWith('config.') && VITEPRESS_CONFIG.test(rel) ? `.vitepress/${name}` : null;
+}
+
 function configTool(name: string): string {
   if (name === '.parcelrc') return 'parcel';
+  if (name.startsWith('.vitepress/')) return 'vitepress';
   return name.startsWith('gatsby-config.') ? 'gatsby' : name.slice(0, name.indexOf('.'));
 }
 
@@ -170,15 +202,15 @@ export function detectJsBundler(packageJsons: PackageJson[], treePaths: string[]
   for (const tool of BUNDLER_PACKAGES) {
     if (packageJsons.some((p) => DEPENDENCY_MAPS.some((key) => p[key].has(tool)))) return `${tool} (dependency)`;
   }
-  const configs = treePaths.filter((path) => {
-    if (!BUNDLER_CONFIG.test(basename(path))) return false;
+  // The first config file in path order.
+  let config: { path: string; name: string } | null = null;
+  for (const path of treePaths) {
     const rel = under(projectDir, path);
-    return rel !== null && !rel.split('/').includes('node_modules');
-  });
-  if (configs.length > 0) {
-    const name = basename(configs.sort()[0]!);
-    return `${configTool(name)} (config file ${name})`;
+    const name = rel === null ? null : configFileName(rel);
+    if (name === null || rel!.split('/').includes('node_modules')) continue;
+    if (config === null || path < config.path) config = { path, name };
   }
+  if (config) return `${configTool(config.name)} (config file ${config.name})`;
   for (const p of packageJsons) {
     for (const [name, script] of p.scripts) {
       const match = BUNDLER_SCRIPT.exec(script);
@@ -300,8 +332,10 @@ async function scanJsProject(files: RepoFiles, c: LockfileCandidate, truncated: 
   if (c.kind === 'yarn' && root) {
     const patterns = [...new Set(root.workspaces)];
     const tooMany = patterns.length > MAX_WORKSPACE_PATTERNS || patterns.some((p) => p.length > MAX_PATTERN_LENGTH);
-    unsupportedPattern = tooMany || patterns.some((p) => UNSUPPORTED_GLOB.test(p));
-    for (const path of tooMany ? [] : workspacePackageJsonPaths(patterns, files.paths, dir)) {
+    const budget = { steps: MAX_GLOB_STEPS };
+    const paths = tooMany ? [] : workspacePackageJsonPaths(patterns, files.paths, dir, budget);
+    unsupportedPattern = tooMany || budget.steps < 0 || patterns.some((p) => UNSUPPORTED_GLOB.test(p));
+    for (const path of paths) {
       const packageJson = await packageJsons.at(path);
       if (packageJson) workspaces.push({ path: under(dir, dirname(path))!, packageJson });
     }
@@ -352,6 +386,10 @@ export async function scanRepoLockfiles(client: GitHubClient, fullName: string):
   const truncated = tree.truncated === true;
   const candidates = findLockfiles(entries);
   if (candidates.length === 0) return { status: 'none', error: null, truncated, projects: [] };
+  if (candidates.length > MAX_LOCKFILES_PER_REPO) {
+    const error = `More than ${MAX_LOCKFILES_PER_REPO} lockfiles; this repo's lockfiles weren't read.`;
+    return { status: 'error', error, truncated, projects: [] };
+  }
 
   const files = new RepoFiles(client, fullName, entries);
   const projects: ProjectScan[] = [];

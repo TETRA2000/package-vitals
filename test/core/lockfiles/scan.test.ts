@@ -4,7 +4,9 @@ import { GitHubClient } from '../../../src/core/github/client.js';
 import type { DepGraph, ParseResult } from '../../../src/core/lockfiles/graph.js';
 import type { PackageJson } from '../../../src/core/lockfiles/package-json.js';
 import {
+  MAX_GLOB_STEPS,
   MAX_LOCKFILE_BYTES,
+  MAX_LOCKFILES_PER_REPO,
   MAX_PACKAGE_JSONS,
   detectJsBundler,
   findLockfiles,
@@ -144,6 +146,14 @@ const packageJson = (fields: Partial<PackageJson>): PackageJson => ({
   ...fields,
 });
 const map = (o: Record<string, string>) => new Map(Object.entries(o));
+
+/**
+ * Workspace patterns that are each under 1,000 characters but cost a lot to match: `*` and then a long literal
+ * that fails inside the segment, so every resume rescans the literal. Plus 20 deep package.json paths with
+ * filesystem-legal 255-character segments for them to try.
+ */
+const SLOW_PATTERNS = Array.from({ length: 100 }, (_, i) => `${Array.from({ length: 7 }, () => `**/*${'a'.repeat(125)}c`).join('/')}/x${i}`);
+const SLOW_PATHS = Array.from({ length: 20 }, (_, i) => `p${i}/${Array.from({ length: 16 }, () => 'a'.repeat(255)).join('/')}/package.json`);
 
 describe('findLockfiles', () => {
   it('finds lockfiles and skips node_modules and vendor', () => {
@@ -421,10 +431,12 @@ describe('scanRepoLockfiles', () => {
     for (const workspaces of [
       ['packages/a', ...Array.from({ length: 100 }, (_, i) => `packages/x${i}/*`)],
       ['packages/a', `packages/${'*'.repeat(1000)}`],
+      ['packages/a', ...SLOW_PATTERNS.slice(1)], // within both caps, but over the step budget
     ]) {
       const f = fakeRepo({
         'package.json': json({ name: 'mono', workspaces }),
         'packages/a/package.json': json({ name: 'a' }),
+        ...Object.fromEntries(SLOW_PATHS.map((path) => [path, json({ name: 'deep' })])),
         'yarn.lock': YARN_LOCK,
       });
       expect((await scan(f)).projects[0]!.jsBundler).toBe("unknown (a workspace pattern isn't supported)");
@@ -454,6 +466,25 @@ describe('scanRepoLockfiles', () => {
     expect(projects[0]!.jsBundler).toBe('vite (dependency)');
   });
 
+  it(`reads no lockfiles when a repo has more than ${MAX_LOCKFILES_PER_REPO}`, async () => {
+    const repo = (count: number, truncated = false) => fakeRepo(
+      Object.fromEntries(Array.from({ length: count }, (_, i) => [`fixtures/f${i}/Gemfile.lock`, GEMFILE_LOCK])),
+      { truncated },
+    );
+    const fits = await scan(repo(MAX_LOCKFILES_PER_REPO));
+    expect(fits.status).toBe('ok');
+    expect(fits.projects).toHaveLength(MAX_LOCKFILES_PER_REPO);
+
+    const over = repo(MAX_LOCKFILES_PER_REPO + 1, true);
+    expect(await scan(over)).toEqual({
+      status: 'error',
+      error: "More than 50 lockfiles; this repo's lockfiles weren't read.",
+      truncated: true,
+      projects: [],
+    });
+    expect(requested(over)).toEqual([TREE]);
+  });
+
   it('never gives a Ruby project a JS bundler', async () => {
     const { projects } = await scan(fakeRepo({ 'Gemfile.lock': GEMFILE_LOCK, 'Gemfile': GEMFILE, 'vite.config.ts': '' }));
     expect(projects[0]!.jsBundler).toBeNull();
@@ -481,7 +512,8 @@ describe('detectJsBundler', () => {
   it('finds every listed dependency in any of the four maps', () => {
     const tools = ['vite', 'webpack', 'rollup', 'esbuild', 'parcel', 'parcel-bundler', 'next', 'nuxt', '@sveltejs/kit',
       '@remix-run/dev', 'astro', 'gatsby', 'react-scripts', '@vue/cli-service', '@angular-devkit/build-angular',
-      'browserify', '@rspack/core', 'tsup'];
+      'browserify', '@rspack/core', 'tsup', 'expo', 'react-native', 'metro', '@rsbuild/core', '@vercel/ncc',
+      '@docusaurus/core', 'vitepress', 'tsdown', 'rolldown', 'snowpack', '@parcel/core'];
     const maps = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
     for (const tool of tools) {
       for (const key of maps) {
@@ -503,6 +535,35 @@ describe('detectJsBundler', () => {
     expect(config(['web/node_modules/x/webpack.config.js'], 'web')).toBeNull();
     expect(config(['api/vite.config.ts', 'webapp/vite.config.ts'], 'web')).toBeNull();
     expect(config(['vite.config.json', 'myvite.config.ts', 'vite.config.ts.bak'])).toBeNull();
+    // The first in path order, wherever it is in the tree listing.
+    expect(config(['web/webpack.config.js', 'next.config.mjs', 'z/vite.config.ts'])).toBe('next (config file next.config.mjs)');
+  });
+
+  it('recognizes Metro, Rsbuild, ncc, Docusaurus, VitePress, tsdown, rolldown, and Snowpack', () => {
+    const config = (path: string) => detectJsBundler([], [path], '.');
+    expect(config('metro.config.js')).toBe('metro (config file metro.config.js)');
+    expect(config('rsbuild.config.ts')).toBe('rsbuild (config file rsbuild.config.ts)');
+    expect(config('website/docusaurus.config.js')).toBe('docusaurus (config file docusaurus.config.js)');
+    expect(config('tsdown.config.ts')).toBe('tsdown (config file tsdown.config.ts)');
+    expect(config('rolldown.config.mjs')).toBe('rolldown (config file rolldown.config.mjs)');
+    expect(config('docs/.vitepress/config.mts')).toBe('vitepress (config file .vitepress/config.mts)');
+    expect(config('.vitepress/config.js')).toBe('vitepress (config file .vitepress/config.js)');
+    expect(config('docs/vitepress/config.mts')).toBeNull();
+    expect(config('docs/.vitepress/config.json')).toBeNull();
+    expect(config('src/config.ts')).toBeNull();
+
+    const script = (value: string) => detectJsBundler([packageJson({ scripts: map({ build: value }) })], [], '.');
+    expect(script('expo export --platform web')).toBe('expo (script "build")');
+    expect(script('react-native bundle --platform ios')).toBe('react-native (script "build")');
+    expect(script('metro build index.js')).toBe('metro (script "build")');
+    expect(script('rsbuild build')).toBe('rsbuild (script "build")');
+    expect(script('ncc build src/index.ts -o dist')).toBe('ncc (script "build")');
+    expect(script('docusaurus build')).toBe('docusaurus (script "build")');
+    expect(script('vitepress build docs')).toBe('vitepress (script "build")');
+    expect(script('tsdown')).toBe('tsdown (script "build")');
+    expect(script('rolldown -c')).toBe('rolldown (script "build")');
+    expect(script('snowpack build')).toBe('snowpack (script "build")');
+    expect(script('expo-doctor && react-native-version')).toBeNull();
   });
 
   it('matches bundler commands in scripts as whole words', () => {
@@ -571,11 +632,28 @@ describe('workspacePackageJsonPaths', () => {
     expect(workspacePackageJsonPaths(['packages/a/node_modules/*'], tree, '.')).toEqual([]);
   });
 
-  it('stays fast on patterns full of wildcards', () => {
-    const deep = `${Array.from({ length: 200 }, (_, i) => `d${i}`).join('/')}/package.json`;
-    const pattern = Array.from({ length: 200 }, () => '**').join('/') + '/zzz';
+  it('stops matching, and returns nothing, when the step budget runs out', () => {
+    expect(SLOW_PATTERNS.every((p) => p.length < 1000)).toBe(true);
+    const budget = { steps: MAX_GLOB_STEPS };
     const start = performance.now();
-    expect(workspacePackageJsonPaths([pattern, `${'*a'.repeat(100)}b`], [deep, `${'a'.repeat(5000)}/package.json`], '.')).toEqual([]);
-    expect(performance.now() - start).toBeLessThan(1000);
+    expect(workspacePackageJsonPaths([...SLOW_PATTERNS, 'p*/**'], SLOW_PATHS, '.', budget)).toEqual([]);
+    expect(budget.steps).toBeLessThan(0);
+    // A generous secondary check: the budget, not the clock, is the bound.
+    expect(performance.now() - start).toBeLessThan(5000);
+  });
+
+  it('spends a step for every position a ** opens', () => {
+    const deep = `${Array.from({ length: 100 }, (_, i) => `d${i}`).join('/')}/package.json`;
+    const budget = { steps: MAX_GLOB_STEPS };
+    expect(workspacePackageJsonPaths([Array.from({ length: 50 }, () => '**').join('/')], [deep], '.', budget)).toEqual([deep]);
+    expect(MAX_GLOB_STEPS - budget.steps).toBeGreaterThanOrEqual(50 * 100);
+  });
+
+  it('matches a large monorepo well within the budget', () => {
+    const paths = Array.from({ length: 2000 }, (_, i) => `packages/p${i}/package.json`);
+    const budget = { steps: MAX_GLOB_STEPS };
+    const found = workspacePackageJsonPaths(['apps/*', 'tools/**', 'packages/*', '!packages/p1'], paths, '.', budget);
+    expect(found).toHaveLength(1999);
+    expect(budget.steps).toBeGreaterThan(MAX_GLOB_STEPS / 2);
   });
 });
