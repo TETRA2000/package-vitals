@@ -365,7 +365,7 @@ export function parseNpmLock(text: string, packageJson: PackageJson | null): Par
     - `dependencies:` and `optionalDependencies:` open maps of `name range` indented 4 spaces.
     - Other keys are ignored.
   - **Nodes:**
-    - There is one node per entry. Its name comes from the first descriptor, cut at the last `@` after position 0. A range `npm:<real>@<range>` names the real package.
+    - There is one node per entry. Its name comes from the first descriptor, cut at the first `@` after position 0 (so git ranges containing `@` and `alias@npm:real@range` split correctly). A range `npm:<real>@<range>` names the real package.
     - `version` comes from the entry.
     - `registry` is true when the `resolved` host is `registry.yarnpkg.com` or `registry.npmjs.org`.
     - `lockDev` is null.
