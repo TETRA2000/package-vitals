@@ -1,5 +1,5 @@
 import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, type KeyboardEvent } from 'react';
 import type { FindingRow } from '../../../core/types.js';
 import { formatAge } from '../format';
 
@@ -13,6 +13,8 @@ export interface FindingListProps {
 
 export function FindingList({ rows, selectedIndex, onSelect, now }: FindingListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const optionId = (index: number) => `${listId}-${index}`;
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -39,14 +41,19 @@ export function FindingList({ rows, selectedIndex, onSelect, now }: FindingListP
     if (clamped !== selectedIndex) onSelect(clamped);
   }
 
+  const items = virtualizer.getVirtualItems();
+  // Point only at a row that is in the DOM: a selected row scrolled out of the window has no element.
+  const activeId = selectedIndex !== null && items.some((item) => item.index === selectedIndex) ? optionId(selectedIndex) : undefined;
+
   return (
     <div ref={scrollRef} className="finding-scroll">
-      <div role="listbox" aria-label="Findings" tabIndex={0} onKeyDown={onKeyDown} className="finding-list" style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-        {virtualizer.getVirtualItems().map((item) => {
+      <div role="listbox" aria-label="Findings" aria-activedescendant={activeId} tabIndex={0} onKeyDown={onKeyDown} className="finding-list" style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {items.map((item) => {
           const r = rows[item.index]!;
           return (
             <div
               key={`${r.repoId}/${r.number}`}
+              id={optionId(item.index)}
               role="option"
               aria-selected={item.index === selectedIndex}
               className="finding-row"

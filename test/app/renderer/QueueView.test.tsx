@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -209,5 +209,37 @@ describe('QueueView', () => {
     expect(selected()).toEqual(['false', 'false', 'true']);
     await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}');
     expect(selected()).toEqual(['true', 'false', 'false']);
+  });
+
+  it('points the list at the selected row so a screen reader hears it', async () => {
+    const user = userEvent.setup();
+    const listFindings = vi.fn(async () => ({ rows: [row(1), row(2), row(3)], counts: COUNTS }));
+    renderQueue(fakeApi({ listFindings, getFinding: vi.fn(async () => null) }));
+    const items = await rows();
+    const list = screen.getByRole('listbox', { name: 'Findings' });
+    expect(list).not.toHaveAttribute('aria-activedescendant');
+
+    await user.click(items[0]!);
+    expect(items[0]!.id).not.toBe('');
+    expect(list).toHaveAttribute('aria-activedescendant', items[0]!.id);
+    await user.keyboard('{ArrowDown}');
+    expect(list).toHaveAttribute('aria-activedescendant', items[1]!.id);
+    expect(new Set(items.map((r) => r.id)).size).toBe(3);
+  });
+
+  it('drops the active row from the list once it scrolls out of the rendered window', async () => {
+    const user = userEvent.setup();
+    const listFindings = vi.fn(async () => ({ rows: Array.from({ length: 1000 }, (_, i) => row(i + 1)), counts: COUNTS }));
+    const { container } = renderQueue(fakeApi({ listFindings, getFinding: vi.fn(async () => null) }));
+    const first = (await rows())[0]!;
+    await user.click(first);
+    const list = screen.getByRole('listbox', { name: 'Findings' });
+    expect(list).toHaveAttribute('aria-activedescendant', first.id);
+
+    const scroller = container.querySelector<HTMLElement>('.finding-scroll')!;
+    scroller.scrollTop = 20_000;
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(within(list).queryByText('pkg-1 (npm)')).not.toBeInTheDocument());
+    expect(list).not.toHaveAttribute('aria-activedescendant');
   });
 });
