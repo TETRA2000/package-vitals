@@ -57,6 +57,7 @@ It builds on Plans 1 and 2 (`docs/superpowers/plans/2026-10-24-package-vitals-{1
        - npm's own `dev` flag, where present, agrees.
      - When no lockfile was read, Dependabot's `development` scope is enough, except for npm.
   3. For npm, the project's lockfile was read and no JS bundler was detected.
+  4. The finding is npm or RubyGems. Spec Section 5 says findings in other ecosystems "stay not triaged" in this version.
 - **JS bundler detection** follows the spec's list, plus `react-scripts`, `@vue/cli-service`, `@angular-devkit/build-angular`, `browserify`, `@rspack/core`, and `tsup`. It looks at dependencies, config files, and scripts in the project and its workspaces. Uncertainty (too many `package.json` files to read) counts as a bundler.
 - **Outdated dependencies:** a direct dependency (prod or dev) whose locked version is older than the registry's latest release: npm's `latest` dist-tag, or RubyGems' `latest.json`.
   - It is counted per repo, once per ecosystem and name.
@@ -335,7 +336,7 @@ export function parseNpmLock(text: string, packageJson: PackageJson | null): Par
     - `survives hostile names and deep nesting`:
       - Packages named `__proto__` and `constructor` become nodes and resolve.
       - `Object.prototype` gains no keys.
-      - A v1 lockfile nested 100,000 levels deep returns `status: 'error'` and doesn't throw.
+      - A v1 lockfile nested 100,000 levels deep doesn't throw. It returns either `ok` or `error`, and an `error` has the message `Couldn't read this lockfile.`
 - [ ] **Step 2: Run** `npx vitest run test/core/lockfiles`. Expected: FAIL.
 - [ ] **Step 3: Implement** `package-json.ts` and `npm.ts`.
 - [ ] **Step 4: Run** `npm run typecheck && npx vitest run`. Expected: all tests pass.
@@ -720,7 +721,8 @@ export interface FindingRecord {
 - Produces, in `tier-one.ts`: `tierOne(f: { ecosystem: string; scope: 'runtime' | 'development' | null; lockfileRead: boolean; lockfileDevOnly: boolean | null; jsBundler: string | null }): 'not_shipped' | null`. The rule is the plan decision above:
   - null when `scope` is `runtime` or `lockfileDevOnly` is false
   - for npm: `not_shipped` only when `lockfileRead`, `lockfileDevOnly` is true, and `jsBundler` is null
-  - for other ecosystems: `not_shipped` when `lockfileDevOnly` is true, or when the lockfile wasn't read and `scope` is `development`
+  - for rubygems: `not_shipped` when `lockfileDevOnly` is true, or when the lockfile wasn't read and `scope` is `development`
+  - for any other ecosystem: always null (spec Section 5: they "stay not triaged")
 - Produces, in `build.ts`:
   - `interface BuiltFinding { record: FindingRecord; projectPath: string | null; targets: number[] }`. `targets` are the node IDs of the installed vulnerable instances in that project's graph, which the Checkup needs for upgrades.
   - `buildRepoFindings(input: { alerts: DependabotAlert[]; projects: ProjectScan[]; osv: Map<string, OsvAdvisory[]> | null }): BuiltFinding[]`. A null `osv` means OSV failed or didn't run.
@@ -757,8 +759,8 @@ export interface FindingRecord {
     - dev-only false with scope `development` → null
     - rubygems not read, scope `development` → not_shipped
     - rubygems read, dev-only null, scope `development` → null
-    - pip, not read, scope `development` → not_shipped
-    - pip, scope `runtime` → null
+    - pip, not read, scope `development` → null
+    - rust, not read, scope `development` → null
   - `build.test.ts`:
     - `an alert takes installed versions, chains, and relationship from its lockfile`: for an alert on minimist `< 0.2.4`, with nodes `0.0.8` (under mkdirp) and `1.2.8` (direct), `installedVersions` is `['0.0.8']`, the relationship is `transitive`, and the chain is `slack-deck → mkdirp 0.5.1 → minimist 0.0.8`.
     - `an OSV match makes it "both", through the GHSA ID or a CVE alias`
@@ -850,7 +852,7 @@ INSERT INTO findings (snapshot_id, repo_id, alert_number, source, ecosystem, pac
 - Produces, in `store.ts`:
   - `recordLockfiles(db, snapshotId, repoId, scan: RepoLockfileScan): void` writes, in one transaction:
     - the repo's `lockfiles_status`, `lockfiles_error`, and `tree_truncated`
-    - one `lockfiles` row per project: `format` is the graph's format, or the unsupported format, or null; `complete` is `isComplete` for `ok` projects
+    - one `lockfiles` row per project: `format` is the graph's format, or the unsupported format, or null; `error` is the `unsupported` or `error` message; `complete` is `isComplete` for `ok` projects
     - one `direct_dependencies` row per registry node that a root edge reaches, with `dev = 1` only when every root edge to it is `dev`, and `lookup 'skipped'`
   - `recordLatestVersions(db, snapshotId, results: { ecosystem: PackageEcosystem; name: string; lookup: LatestLookup }[]): void` updates every row of that ecosystem and name in the snapshot: `latest`, `lookup`, and `outdated` (from `isOutdated`, NULL when unknown).
   - `insertFindings(db, snapshotId, repoId, records: FindingRecord[], firstSeen: string): void`. A null `createdAt` takes the `created_at` of the OSV-only finding with the same repo, manifest, ecosystem, package, and advisory in the previous complete snapshot of the same owner and scope. Without one it takes `firstSeen`.
@@ -864,6 +866,7 @@ INSERT INTO findings (snapshot_id, repo_id, alert_number, source, ecosystem, pac
     - `lockfiles?: { path: string; status: 'ok' | 'unsupported' | 'error'; error?: string; format?: string; directDependencies?: { name: string; version: string; latest?: string; lookup?: string; outdated?: boolean }[] }[]`
     - `lockfilesStatus?`
   - New `SeedSpec` field: `osv?: 'ok' | { error: string } | null`. The default is `'ok'`. Null means Level 1 never ran: `osv_status` and `lockfiles_status` stay NULL.
+  - When `osv` isn't null, a repo's `lockfiles_status` defaults to `'ok'` if it has `lockfiles`, and to `'none'` otherwise.
 
 - [ ] **Step 1: Write the failing tests**
   - `database.test.ts`: `migration 2 adds Level 1 tables and turns open alerts into findings`. Build a version-1 file by running `MIGRATIONS[0]` and setting `user_version = 1`. Insert one open and one dismissed alert, then reopen it with `openDatabase`. The result has `user_version` 2 and exactly one finding, with `source 'dependabot'`, `severity_source 'advisory'`, and `tier` NULL.
@@ -1173,7 +1176,9 @@ export interface Level1Summary {
   - New test `lockfile data stays text`. It selects the OSV-only finding and checks:
     - the side panel shows the chain literally, and the page has no `img` element
     - the notice lists the lockfile path literally
-  - New test `not-shipped findings sink to the bottom`. With all severities ticked, the last row carries the `Not shipped` tag.
+  - New test `not-shipped findings sink to the bottom`:
+    - Choosing Triage `Not shipped` shows the seeded not-shipped finding with its `Not shipped` tag.
+    - Calling `window.vitals.listFindings` from the page with all severities and no other filter returns that finding last. The list only renders visible rows, so the last row can't be checked on screen.
 - [ ] **Step 2: Run** `npm run build && npm run test:e2e`. Expected: all end-to-end tests pass.
 - [ ] **Step 3: Update `README.md`:**
   - what the Checkup now reads (the file names, the supported formats, and the unsupported ones)
