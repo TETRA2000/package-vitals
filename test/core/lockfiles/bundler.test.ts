@@ -347,3 +347,24 @@ end
     expect(m.get("d")).toEqual(["test"]);
   });
 });
+
+describe("Gemfile rules the lock parser relies on", () => {
+  it("keeps a custom group such as production as runtime", () => {
+    const g = graphOf(
+      parseGemfileLock(
+        LOCK,
+        "gem 'pry', group: :production\ngroup :production do\n  gem 'rails'\nend\n",
+      ),
+    );
+    expect(g.roots[0]!.edges.every((e) => e.kind === "prod")).toBe(true);
+  });
+
+  it("doesn't let a modifier if or unless open a block", () => {
+    const m = parseGemfileGroups(
+      "ruby '3.2.0' if RUBY_VERSION\nputs 'x' unless ENV['Q']\ngem 'a' if ENV['Y']\ngem 'b' unless ENV['Z']\n",
+    );
+    expect(m).not.toBeNull();
+    expect(m!.get("a")).toEqual([]);
+    expect(m!.get("b")).toEqual([]);
+  });
+});
