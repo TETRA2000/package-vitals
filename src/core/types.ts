@@ -141,3 +141,17 @@ export interface ReportEntry {
 
 /** Package ecosystems the Checkup reads lockfiles for, named as Dependabot names them. */
 export type PackageEcosystem = 'npm' | 'rubygems';
+
+export interface ChainLink {
+  name: string;
+  version: string;
+}
+
+/** From a project root (`root` is its label) down to the vulnerable package, which is the last link. */
+export interface DependencyChain {
+  root: string;
+  links: ChainLink[];
+  dev: boolean;
+}
+
+export type Relationship = 'direct' | 'transitive' | 'mixed';
