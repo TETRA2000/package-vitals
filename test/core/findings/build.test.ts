@@ -134,21 +134,49 @@ describe('buildRepoFindings: Dependabot findings', () => {
   });
 
   it("the alert's range picks the targets, and a version it can't compare counts", () => {
-    // slack-deck → (dev) mkdirp → minimist 0.0.8, and slack-deck → minimist 1.2.8
-    const g = graph([dev(0), prod(2)], [node(0, 'mkdirp', '0.5.1'), node(1, 'minimist', '0.0.8'), node(2, 'minimist', '1.2.8')], [[prod(1)], [], []]);
+    // slack-deck → (dev) mkdirp → minimist 0.0.8, and slack-deck → (dev) minimist 1.2.8
+    const g = graph([dev(0), dev(2)], [node(0, 'mkdirp', '0.5.1'), node(1, 'minimist', '0.0.8'), node(2, 'minimist', '1.2.8')], [[prod(1)], [], []]);
     const dev008 = build([alert({ scope: 'development' })], [project('package-lock.json', g)]);
     expect(dev008[0]!.targets).toEqual([1]);
-    expect(dev008[0]!.record).toMatchObject({ installedVersions: ['0.0.8'], lockfileDevOnly: true, tier: 'not_shipped' });
+    expect(dev008[0]!.record).toMatchObject({ installedVersions: ['0.0.8'], relationship: 'transitive', chainCount: 1, lockfileDevOnly: true, tier: 'not_shipped' });
 
-    // A runtime minimist at a version that can't be compared with the range might be vulnerable.
+    // A minimist at a version that can't be compared with the range might be vulnerable.
     const unknown = graph(g.roots[0]!.edges, [...g.nodes.slice(0, 2), node(2, 'minimist', '1.2')], g.edges);
     const withUnknown = build([alert({ scope: 'development' })], [project('package-lock.json', unknown)]);
     expect(withUnknown[0]!.targets).toEqual([1, 2]);
-    expect(withUnknown[0]!.record).toMatchObject({ installedVersions: ['0.0.8', '1.2'], lockfileDevOnly: false, tier: null });
+    expect(withUnknown[0]!.record).toMatchObject({ installedVersions: ['0.0.8', '1.2'], relationship: 'mixed', chainCount: 2 });
 
     // Without a range, every installed minimist is a target.
     const noRange = build([alert({ scope: 'development', vulnerableRange: null })], [project('package-lock.json', g)]);
-    expect(noRange[0]!.record).toMatchObject({ installedVersions: ['0.0.8', '1.2.8'], relationship: 'mixed', lockfileDevOnly: false, tier: null });
+    expect(noRange[0]!.targets).toEqual([1, 2]);
+    expect(noRange[0]!.record).toMatchObject({ installedVersions: ['0.0.8', '1.2.8'], relationship: 'mixed' });
+  });
+
+  it('dev-only covers every installed copy of the package', () => {
+    // slack-deck → (dev) minimist 0.0.8, in the alert's range, and slack-deck → minimist 1.2.5, outside it.
+    const g = graph([dev(0), prod(1)], [node(0, 'minimist', '0.0.8'), node(1, 'minimist', '1.2.5')]);
+    const projects = [project('package-lock.json', g)];
+    const run = (osv: Map<string, OsvAdvisory[]> | null) => build([alert({ scope: 'development' })], projects, osv)[0]!;
+
+    // OSV lists the alert's advisory for 1.2.5 too, so it is a vulnerable copy as well.
+    const listed = run(osvFor(projects, { 'minimist@0.0.8': [MINIMIST], 'minimist@1.2.5': [MINIMIST] }));
+    expect(listed.targets).toEqual([0, 1]);
+    expect(listed.record).toMatchObject({ source: 'both', installedVersions: ['0.0.8', '1.2.5'], relationship: 'direct', chainCount: 2, lockfileDevOnly: false, tier: null });
+
+    // Without that hit 1.2.5 isn't a vulnerable copy, but it still ships the package.
+    for (const osv of [osvFor(projects, { 'minimist@0.0.8': [MINIMIST] }), null]) {
+      const unlisted = run(osv);
+      expect(unlisted.targets).toEqual([0]);
+      expect(unlisted.record).toMatchObject({ installedVersions: ['0.0.8'], chainCount: 1, lockfileDevOnly: false, tier: null });
+    }
+
+    // The same for an OSV-only finding: lodash 4.17.4 is dev-only, but lodash 4.17.21 ships.
+    const lodash = graph([dev(0), prod(1)], [node(0, 'lodash', '4.17.4'), node(1, 'lodash', '4.17.21')]);
+    const lodashProjects = [project('package-lock.json', lodash)];
+    const pollution = advisory('GHSA-p6mc-m468-83gw', { ranges: [semver({ introduced: '3.7.0' }, { fixed: '4.17.19' })] });
+    const [osvOnly] = build([], lodashProjects, osvFor(lodashProjects, { 'lodash@4.17.4': [pollution] }));
+    expect(osvOnly!.targets).toEqual([0]);
+    expect(osvOnly!.record).toMatchObject({ source: 'osv', installedVersions: ['4.17.4'], lockfileDevOnly: false, tier: null });
   });
 
   it('installed versions are unique and in version order, with ones that can\'t be compared last', () => {
@@ -174,6 +202,9 @@ describe('buildRepoFindings: Dependabot findings', () => {
     };
     // Two lockfiles beside it: which one Dependabot read can't be told.
     expect(levelZero('web/package.json', [...projects, project('web/package-lock.json', slackDeck())])).toEqual([null, false]);
+    // Nor with one beside it that couldn't be read: that may be the one Dependabot read.
+    const unreadYarn: ProjectScan = { ...project('web/yarn.lock', slackDeck()), result: { status: 'error', message: "Couldn't read this lockfile." } };
+    expect(levelZero('web/package.json', [unreadYarn, project('web/package-lock.json', slackDeck())])).toEqual([null, false]);
     // A lockfile that couldn't be read isn't used.
     const failed: ProjectScan = { ...projects[1]!, result: { status: 'error', message: "Couldn't read this lockfile." } };
     expect(levelZero('web/yarn.lock', [failed])).toEqual([null, false]);
@@ -270,11 +301,13 @@ describe('buildRepoFindings: matching OSV', () => {
     ]);
   });
 
-  it('only a target\'s OSV records make it "both"', () => {
-    // OSV reports minimist 1.2.8, which the alert's range leaves out.
-    const other = osvFor(projects, { 'minimist@1.2.8': [MINIMIST] });
-    const [f] = build([alert()], projects, other);
-    expect(f!.record.source).toBe('dependabot');
+  it('only OSV records for the package make it "both"', () => {
+    // OSV lists the advisory for mkdirp: that's another package's finding.
+    const other = osvFor(projects, { 'mkdirp@0.5.1': [MINIMIST] });
+    expect(summary(build([alert()], projects, other))).toEqual([
+      [41, 'dependabot', 'minimist', 'GHSA-xvch-5gv4-984h'],
+      [null, 'osv', 'mkdirp', 'GHSA-xvch-5gv4-984h'],
+    ]);
     // A non-registry node is never looked up, whatever the map holds.
     const git = graph([prod(0)], [node(0, 'minimist', '0.0.8', false)]);
     const gitProjects = [project('package-lock.json', git)];

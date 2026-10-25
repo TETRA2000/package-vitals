@@ -33,14 +33,18 @@ const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const dirname = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '.');
 const byString = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-/** The lockfile behind an alert: the one at its manifest path, or the only one beside its package.json or Gemfile. */
-function projectFor(alert: DependabotAlert, projects: OkProject[]): OkProject | null {
+/**
+ * The read lockfile behind an alert: the one at its manifest path, or the only one beside its package.json or Gemfile.
+ * Lockfiles that couldn't be read count as candidates, so one that may be Dependabot's is never passed over.
+ */
+function projectFor(alert: DependabotAlert, projects: ProjectScan[]): OkProject | null {
   const sameEcosystem = projects.filter((p) => p.ecosystem === alert.ecosystem);
   const exact = sameEcosystem.find((p) => p.path === alert.manifestPath);
-  if (exact) return exact;
+  if (exact) return isOk(exact) ? exact : null;
   if (MANIFESTS.get(basename(alert.manifestPath)) !== alert.ecosystem) return null;
   const beside = sameEcosystem.filter((p) => dirname(p.path) === dirname(alert.manifestPath));
-  return beside.length === 1 ? beside[0]! : null;
+  const only = beside.length === 1 ? beside[0]! : null;
+  return only !== null && isOk(only) ? only : null;
 }
 
 /** The advisory names the alert's GHSA ID, or its CVE when it has one, as its ID or an alias. */
@@ -66,11 +70,16 @@ function versionOrder(ecosystem: PackageEcosystem, versions: string[]): string[]
   });
 }
 
-function lockfileFacts(project: OkProject | null, targets: number[]): Facts {
+/**
+ * What the lockfile says about the vulnerable copies (`targets`) of package `name`. Dev-only is judged over every
+ * installed copy of the package, at any version: if one ships, the package ships.
+ */
+function lockfileFacts(project: OkProject | null, name: string, targets: number[]): Facts {
   if (project === null) {
     return { installedVersions: [], relationship: null, chains: [], chainCount: 0, lockfileRead: false, lockfileDevOnly: null, jsBundler: null };
   }
   const g = project.result.graph;
+  const copies = g.nodes.flatMap((n, id) => (n.name === name ? [id] : []));
   const { chains, total } = chainsTo(g, targets, CHAIN_LIMIT);
   return {
     installedVersions: versionOrder(project.ecosystem, targets.map((t) => g.nodes[t]!.version)),
@@ -78,7 +87,7 @@ function lockfileFacts(project: OkProject | null, targets: number[]): Facts {
     chains,
     chainCount: total,
     lockfileRead: true,
-    lockfileDevOnly: devOnly(g, targets),
+    lockfileDevOnly: devOnly(g, copies),
     jsBundler: project.jsBundler,
   };
 }
@@ -87,11 +96,21 @@ const withTier = (r: Omit<FindingRecord, 'tier'>): FindingRecord => ({ ...r, tie
 
 // ---- Dependabot findings ----
 
-function alertFinding(alert: DependabotAlert, projects: OkProject[], osv: Map<string, OsvAdvisory[]> | null): BuiltFinding {
+/**
+ * The vulnerable copies of an alert's package: those its range doesn't rule out, including versions it can't compare,
+ * and those OSV lists its advisory for. An alert carries one of the advisory's ranges, so OSV can see more.
+ */
+function alertTargets(alert: DependabotAlert, project: OkProject, osv: Map<string, OsvAdvisory[]> | null): number[] {
+  const listed = (id: number) => osv !== null && reportedAt(osv, project, id).some((a) => matches(a, alert));
+  return project.result.graph.nodes.flatMap((n, id) =>
+    n.name === alert.packageName && (inVulnerableRange(project.ecosystem, n.version, alert.vulnerableRange) !== false || listed(id))
+      ? [id]
+      : []);
+}
+
+function alertFinding(alert: DependabotAlert, projects: ProjectScan[], osv: Map<string, OsvAdvisory[]> | null): BuiltFinding {
   const project = projectFor(alert, projects);
-  // Installed instances of the package that the alert's range doesn't rule out, including versions it can't compare.
-  const targets = project === null ? [] : project.result.graph.nodes.flatMap((n, id) =>
-    n.name === alert.packageName && inVulnerableRange(project.ecosystem, n.version, alert.vulnerableRange) !== false ? [id] : []);
+  const targets = project === null ? [] : alertTargets(alert, project, osv);
   const both = project !== null && osv !== null && targets.some((t) => reportedAt(osv, project, t).some((a) => matches(a, alert)));
   const record = withTier({
     alertNumber: alert.number,
@@ -109,7 +128,7 @@ function alertFinding(alert: DependabotAlert, projects: OkProject[], osv: Map<st
     createdAt: alert.createdAt,
     scope: alert.scope,
     githubRelationship: alert.relationship,
-    ...lockfileFacts(project, targets),
+    ...lockfileFacts(project, alert.packageName, targets),
     upgrades: null,
   });
   return { record, projectPath: project?.path ?? null, targets };
@@ -155,7 +174,7 @@ function osvFinding(project: OkProject, name: string, group: Reported[]): BuiltF
   // The highest severity; at equal severity an advisory's own beats a malware record's, which beats an assumed one.
   const worst = advisories.reduce((w, a) => (rank(a) > rank(w) ? a : w));
   const targets = [...new Set(group.flatMap((m) => m.nodes))].sort((a, b) => a - b);
-  const facts = lockfileFacts(project, targets);
+  const facts = lockfileFacts(project, name, targets);
   const highest = facts.installedVersions.findLast((v) => isValid(project.ecosystem, v));
   const record = withTier({
     alertNumber: null,
@@ -206,10 +225,9 @@ export function buildRepoFindings(input: {
   projects: ProjectScan[];
   osv: Map<string, OsvAdvisory[]> | null;
 }): BuiltFinding[] {
-  const projects = input.projects.filter(isOk);
   const fromAlerts = input.alerts
     .filter((a) => a.state === 'open')
-    .map((a) => alertFinding(a, projects, input.osv))
+    .map((a) => alertFinding(a, input.projects, input.osv))
     .sort((x, y) => x.record.alertNumber! - y.record.alertNumber!);
   const osv = input.osv;
   if (osv === null) return fromAlerts;
@@ -217,13 +235,14 @@ export function buildRepoFindings(input: {
   // Each open, dismissed, or auto-dismissed alert accounts for matching OSV results in its own project only.
   const accounting = new Map<OkProject, DependabotAlert[]>();
   for (const alert of input.alerts) {
-    const project = ACCOUNTING_STATES.has(alert.state) ? projectFor(alert, projects) : null;
+    const project = ACCOUNTING_STATES.has(alert.state) ? projectFor(alert, input.projects) : null;
     if (project === null) continue;
     const list = accounting.get(project);
     if (list) list.push(alert);
     else accounting.set(project, [alert]);
   }
-  const fromOsv = projects
+  const fromOsv = input.projects
+    .filter(isOk)
     .flatMap((p) => osvFindings(p, accounting.get(p) ?? [], osv))
     .sort((x, y) =>
       byString(x.record.packageName, y.record.packageName) ||
