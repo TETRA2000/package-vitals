@@ -232,6 +232,50 @@ snapshots:
     expect(g.unresolved).toEqual([]);
   });
 
+  it('git, tarball, and file versions with an @ are not aliases', () => {
+    const g = graphOf(
+      parsePnpmLock(
+        lock(`
+importers:
+  .:
+    dependencies:
+      foo:
+        specifier: git+ssh://git@github.com/o/foo.git
+        version: git+ssh://git@github.com/o/foo.git#abc
+packages:
+  foo@git+ssh://git@github.com/o/foo.git#abc:
+    resolution: {commit: abc, repo: 'git@github.com:o/foo.git', type: git}
+    version: 1.0.0
+  bar@https://user@codeload.github.com/o/bar/tar.gz/def:
+    resolution: {tarball: 'https://user@codeload.github.com/o/bar/tar.gz/def'}
+    version: 1.0.0
+  baz@file:../pkg@x:
+    resolution: {directory: ../pkg@x, type: directory}
+    version: 1.0.0
+snapshots:
+  foo@git+ssh://git@github.com/o/foo.git#abc:
+    dependencies:
+      bar: https://user@codeload.github.com/o/bar/tar.gz/def
+      baz: file:../pkg@x
+  bar@https://user@codeload.github.com/o/bar/tar.gz/def: {}
+  baz@file:../pkg@x: {}
+`),
+      ),
+    );
+    expect(g.nodes.map((n) => [n.name, n.version, n.registry])).toEqual([
+      ['foo', 'git+ssh://git@github.com/o/foo.git#abc', false],
+      ['bar', 'https://user@codeload.github.com/o/bar/tar.gz/def', false],
+      ['baz', 'file:../pkg@x', false],
+    ]);
+    expect(g.roots[0]!.edges).toEqual([{ to: 0, kind: 'prod' }]);
+    expect(g.edges[0]).toEqual([
+      { to: 1, kind: 'prod' },
+      { to: 2, kind: 'prod' },
+    ]);
+    expect(g.unresolved).toEqual([]);
+    expect(isComplete(g)).toBe(true);
+  });
+
   it('registry comes from the packages entry', () => {
     const g = graphOf(
       parsePnpmLock(
@@ -341,8 +385,28 @@ snapshots:
       format: 'pnpm-v5.4',
       message: "pnpm lockfile version 5.4 isn't supported yet.",
     });
+    expect(parsePnpmLock("lockfileVersion: '5.4.2'\n")).toMatchObject({ format: 'pnpm-v5.4.2' });
     expect(graphOf(parsePnpmLock('lockfileVersion: 9\n')).format).toBe('pnpm-v9');
     expect(graphOf(parsePnpmLock('lockfileVersion: 9.0\n')).format).toBe('pnpm-v9');
+  });
+
+  it("a version that doesn't look like one is never quoted", () => {
+    const unknown = {
+      status: 'unsupported',
+      format: 'pnpm-unknown',
+      message: "This pnpm lockfile version isn't supported yet.",
+    };
+    expect(parsePnpmLock("lockfileVersion: '<img src=x>'\n")).toEqual(unknown);
+    expect(parsePnpmLock(`lockfileVersion: '${'9'.repeat(5000)}'\n`)).toEqual(unknown);
+    expect(parsePnpmLock("lockfileVersion: '6.0\n\n  more'\n")).toEqual(unknown);
+    expect(parsePnpmLock("lockfileVersion: '1.2.3.4'\n")).toEqual(unknown);
+    expect(parsePnpmLock("lockfileVersion: '1000'\n")).toEqual(unknown);
+    expect(parsePnpmLock("lockfileVersion: ' 6.0'\n")).toEqual(unknown);
+    expect(parsePnpmLock('lockfileVersion: -1\n')).toEqual(unknown);
+    expect(parsePnpmLock('lockfileVersion: 1e21\n')).toEqual(unknown);
+    expect(parsePnpmLock('lockfileVersion: .nan\n')).toEqual(unknown);
+    expect(parsePnpmLock('lockfileVersion: [9]\n')).toEqual(unknown);
+    expect(parsePnpmLock('lockfileVersion: true\n')).toEqual(unknown);
   });
 
   it('files that are not pnpm lockfiles', () => {
@@ -352,8 +416,6 @@ snapshots:
     expect(parsePnpmLock('just text\n')).toEqual(notPnpm);
     expect(parsePnpmLock('importers: {}\n')).toEqual(notPnpm);
     expect(parsePnpmLock('lockfileVersion:\n')).toEqual(notPnpm);
-    expect(parsePnpmLock('lockfileVersion: [9]\n')).toEqual(notPnpm);
-    expect(parsePnpmLock('lockfileVersion: true\n')).toEqual(notPnpm);
   });
 
   it('invalid YAML, an alias bomb, and __proto__ keys', () => {

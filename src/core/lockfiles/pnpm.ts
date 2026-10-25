@@ -70,12 +70,20 @@ function splitKey(key: string): { name: string; version: string } {
   return { name: key.slice(0, at), version };
 }
 
-/** The snapshot a dependency resolves to. An alias's version names the real package (`string-width@4.2.3`) and is the key. */
+/**
+ * The snapshot a dependency resolves to. An alias's version names the real package (`string-width@4.2.3`) and is the key.
+ * A package name never holds a `:`, so a `:` before the `@` means a URL or path (`git+ssh://git@…`), not an alias.
+ */
 function snapshotKey(name: string, version: string): string {
   const paren = version.indexOf('(');
   const plain = paren === -1 ? version : version.slice(0, paren);
-  return plain.indexOf('@', 1) !== -1 ? version : `${name}@${version}`;
+  const at = plain.indexOf('@', 1);
+  const alias = at !== -1 && !plain.slice(0, at).includes(':');
+  return alias ? version : `${name}@${version}`;
 }
+
+/** Only a short dotted number goes into a message, so the message never quotes the file. */
+const VERSION_SHOWN = /^\d{1,3}(\.\d{1,3}){0,2}$/;
 
 /** From the registry: resolved by an integrity hash alone, with no tarball URL, git repo, or directory. */
 function fromRegistry(entry: unknown): boolean {
@@ -165,9 +173,12 @@ export function parsePnpmLock(text: string): ParseResult {
   try {
     if (!isMapping(data)) return error('Not a pnpm-lock.yaml file.');
     const version = ownField(data, 'lockfileVersion');
+    if (version === undefined || version === null) return error('Not a pnpm-lock.yaml file.');
     if (version === '9.0' || version === 9) return { status: 'ok', graph: readGraph(data) };
-    if (typeof version !== 'string' && typeof version !== 'number') return error('Not a pnpm-lock.yaml file.');
-    const shown = String(version);
+    const shown = typeof version === 'string' || typeof version === 'number' ? String(version) : '';
+    if (!VERSION_SHOWN.test(shown)) {
+      return { status: 'unsupported', format: 'pnpm-unknown', message: "This pnpm lockfile version isn't supported yet." };
+    }
     return { status: 'unsupported', format: `pnpm-v${shown}`, message: `pnpm lockfile version ${shown} isn't supported yet.` };
   } catch {
     return error("Couldn't read this lockfile.");
