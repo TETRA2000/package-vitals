@@ -18,6 +18,9 @@ export interface RepoInfo {
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
+/** Where a severity came from: the advisory itself, a malicious-package record, or assumed for want of either. */
+export type SeveritySource = 'advisory' | 'malware' | 'assumed';
+
 export type AlertState = 'open' | 'dismissed' | 'auto_dismissed' | 'fixed';
 
 export interface DependabotAlert {
