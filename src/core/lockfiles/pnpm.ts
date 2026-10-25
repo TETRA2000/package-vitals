@@ -1,8 +1,8 @@
-import { isMap, isScalar, isSeq, parseDocument } from 'yaml';
+import { isAlias, isMap, isScalar, isSeq, parseDocument } from 'yaml';
 import type { DepEdge, DepGraph, DepNode, DepRoot, EdgeKind, ParseResult } from './graph.js';
 import { ownField, type JsonObject } from './package-json.js';
 
-// pnpm-lock.yaml, lockfile version 9. The file comes from any repo and is only read: aliases are capped, keys are
+// pnpm-lock.yaml, lockfile version 9. The file comes from any repo and is only read: aliases are refused, keys are
 // checked in one pass, mappings are read through own properties and Maps, and nothing here recurses.
 // What the file doesn't settle makes the graph say less (an unresolved dependency), never more dev-only.
 
@@ -19,14 +19,17 @@ const SNAPSHOT_SECTIONS = [
 const error = (message: string): ParseResult => ({ status: 'error', message });
 
 /**
- * True when no mapping repeats a key, compared as the object key it becomes (`1` and `'1'` are the same key).
- * The library's own check rescans every earlier key for each new one, so it's off and this one pass replaces it.
- * A key that isn't a plain scalar (a collection, an alias, a date) is something pnpm never writes, and fails too.
+ * True when the document holds no alias and no mapping repeats a key, compared as the object key it becomes
+ * (`1` and `'1'` are the same key). pnpm never writes an alias, and resolving many of them takes the library
+ * quadratic time whatever the alias count, so one fails here, before any is resolved. The library's own key check
+ * rescans every earlier key for each new one, so it's off and this one pass replaces it. A key that isn't a plain
+ * scalar (a collection, an alias, a date) is something pnpm never writes, and fails too.
  */
-function keysAreUnique(contents: unknown): boolean {
+function isPlainDocument(contents: unknown): boolean {
   const stack = [contents];
   while (stack.length > 0) {
     const node = stack.pop();
+    if (isAlias(node)) return false;
     if (isMap(node)) {
       const keys = new Set<string>();
       for (const { key, value } of node.items) {
@@ -39,7 +42,6 @@ function keysAreUnique(contents: unknown): boolean {
     } else if (isSeq(node)) {
       for (const item of node.items) stack.push(item);
     }
-    // An alias is checked where its anchor is, and a scalar has no keys.
   }
   return true;
 }
@@ -100,7 +102,8 @@ function readGraph(data: JsonObject): DepGraph {
   const snapshots = mappingField(data, 'snapshots') ?? {};
   const packages = mappingField(data, 'packages') ?? {};
 
-  // pnpm writes every dependency map once. One met twice is a YAML alias, refused so a few lines can't multiply the work.
+  // A second line of defence: aliases are refused before toJS, so no dependency map should be met twice.
+  // One that is would let a few lines multiply the work.
   const seen = new Set<JsonObject>();
   const depsOf = (o: JsonObject, key: string): [string, unknown][] => {
     const deps = mappingField(o, key);
@@ -165,8 +168,8 @@ export function parsePnpmLock(text: string): ParseResult {
   try {
     // What `parse` does, less its warnings, which quote the file to the process, and its quadratic key check.
     const doc = parseDocument(text, { logLevel: 'error', uniqueKeys: false });
-    if (doc.errors.length > 0 || !keysAreUnique(doc.contents)) return error('Not valid YAML.');
-    data = doc.toJS({ maxAliasCount: 100 });
+    if (doc.errors.length > 0 || !isPlainDocument(doc.contents)) return error('Not valid YAML.');
+    data = doc.toJS({ maxAliasCount: 100 }); // the cap is a second line of defence too
   } catch {
     return error('Not valid YAML.');
   }

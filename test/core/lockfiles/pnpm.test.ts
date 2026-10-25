@@ -504,7 +504,8 @@ snapshots:
     ]);
   });
 
-  it('a dependency map used twice, through an alias, is rejected', () => {
+  it('a YAML alias, which pnpm never writes, is invalid YAML', () => {
+    const invalid = error('Not valid YAML.');
     const r = parsePnpmLock(
       lock(`
 snapshots:
@@ -516,13 +517,32 @@ snapshots:
   c@1.0.0: {}
 `),
     );
-    expect(r).toEqual(error("Couldn't read this lockfile."));
+    expect(r).toEqual(invalid);
+    expect(parsePnpmLock(lock('x: &a 1\ny: *a\n'))).toEqual(invalid);
+    // An anchor alone resolves nothing and is harmless.
+    expect(graphOf(parsePnpmLock(lock('snapshots:\n  a@1.0.0: &a {}\n'))).nodes.map((n) => n.name)).toEqual(['a']);
+  });
+
+  it('many aliases are refused before any of them is resolved', () => {
+    const invalid = error('Not valid YAML.');
+    // Each pair redefines the anchor and uses it once, so no alias count is ever exceeded.
+    let started = performance.now();
+    expect(parsePnpmLock(lock('x:\n' + '  - &a x\n  - *a\n'.repeat(40000)))).toEqual(invalid);
+    expect(performance.now() - started).toBeLessThan(1000);
+
+    // An anchor on a list of empty lists counts as holding no aliases, so the count never fires either.
+    started = performance.now();
+    expect(parsePnpmLock(lock(`a: &a [${'[], '.repeat(16000)}[]]\nb: [${'*a, '.repeat(8000)}*a]\n`))).toEqual(invalid);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it('reads a large lockfile', () => {
     let body = 'importers:\n  .:\n    dependencies:\n      p0:\n        specifier: ^1.0.0\n        version: 1.0.0\nsnapshots:\n';
     for (let i = 0; i < 20000; i++) body += `  p${i}@1.0.0:\n    dependencies:\n      p${i + 1}: 1.0.0\n`;
-    const g = graphOf(parsePnpmLock(lock(body)));
+    const started = performance.now();
+    const r = parsePnpmLock(lock(body));
+    expect(performance.now() - started).toBeLessThan(2000);
+    const g = graphOf(r);
     expect(g.nodes).toHaveLength(20000);
     expect(g.unresolved).toEqual(['p19999 > p20000']);
   });
