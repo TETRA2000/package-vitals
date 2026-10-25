@@ -53,7 +53,7 @@ It builds on Plans 1 and 2 (`docs/superpowers/plans/2026-10-24-package-vitals-{1
   2. Some source says dev-only:
      - When the lockfile was read, the lockfile analysis must say dev-only. The analysis says that only when:
        - the graph is complete (roots known, no unresolved required dependency, groups known),
-       - every installed vulnerable instance is reachable, but not through a runtime edge, and
+       - every installed copy of the package (any version, not only the vulnerable ones) is reachable, but not through a runtime edge, and
        - npm's own `dev` flag, where present, agrees.
      - When no lockfile was read, Dependabot's `development` scope is enough, except for npm.
   3. For npm, the project's lockfile was read and no JS bundler was detected.
@@ -730,11 +730,11 @@ export interface FindingRecord {
   - `buildRepoFindings(input: { alerts: DependabotAlert[]; projects: ProjectScan[]; osv: Map<string, OsvAdvisory[]> | null }): BuiltFinding[]`. A null `osv` means OSV failed or didn't run.
   - **The project for an alert:**
     - It is the `ok` project whose `path` equals `manifestPath`.
-    - Failing that, when the manifest's basename is `package.json` or `Gemfile`, it is the only project of that ecosystem in the same directory.
+    - Failing that, when the manifest's basename is `package.json` or `Gemfile`, it is the only lockfile of that ecosystem in the same directory (counting unreadable ones), provided it parsed.
     - Dependabot's `npm` matches npm, yarn, and pnpm projects, and `rubygems` matches Bundler projects.
   - **Dependabot findings:** there is one per open alert.
-    - Its targets are the nodes named like the package whose `inVulnerableRange` isn't false.
-    - From them come `installedVersions` (sorted, unique), `chainsTo` (limit 10), `relationshipOf`, and `devOnly`.
+    - Its targets are the nodes named like the package whose `inVulnerableRange` isn't false, plus the registry nodes of that name whose OSV list matches the alert.
+    - From them come `installedVersions` (sorted, unique), `chainsTo` (limit 10), and `relationshipOf`. `devOnly` is judged over every node with the package's name, so any shipped copy keeps the finding.
     - `lockfileRead` is true when a project was found.
     - The source is `both` when a target's OSV advisories match the alert, otherwise `dependabot`.
   - **Matching an advisory to an alert:** the advisory's ID or aliases include the alert's GHSA ID, or, when the alert has a CVE, its ID or aliases include that CVE.
