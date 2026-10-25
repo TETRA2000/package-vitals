@@ -368,3 +368,39 @@ describe("Gemfile rules the lock parser relies on", () => {
     expect(m!.get("b")).toEqual([]);
   });
 });
+
+describe("dev-group rule and input limits", () => {
+  it("makes a gem dev only when every one of its groups is development or test", () => {
+    for (const gemfile of [
+      "gem 'pry', groups: [:development, :production]\n",
+      "group :test do\n  gem 'pry', group: :production\nend\n",
+      "group :test do\n  group :production do\n    gem 'pry'\n  end\nend\n",
+      "gem 'pry', group: :test\ngem 'pry'\n",
+    ]) {
+      const g = graphOf(parseGemfileLock(LOCK, gemfile));
+      const edge = g.roots[0]!.edges.find((e) => g.nodes[e.to]!.name === "pry")!;
+      expect(edge.kind).toBe("prod");
+      expect(devOnly(g, [idOf(g, "coderay")])).toBe(false);
+    }
+  });
+
+  it("gives up on absurdly nested Gemfiles quickly", () => {
+    const n = 8000;
+    let text = "group :development do\n".repeat(n);
+    for (let i = 0; i < n; i++) text += `gem 'g${i}'\n`;
+    text += "end\n".repeat(n);
+    const t = Date.now();
+    expect(parseGemfileGroups(text)).toBeNull();
+    expect(Date.now() - t).toBeLessThan(1000);
+  });
+
+  it("reads a spec with 80,000 dependency lines in linear time", () => {
+    let lock = "GEM\n  remote: https://rubygems.org/\n  specs:\n    a (1.0)\n";
+    for (let i = 0; i < 80_000; i++) lock += `      d${i}\n`;
+    lock += "\nDEPENDENCIES\n  a\n";
+    const t = Date.now();
+    const r = parseGemfileLock(lock, null);
+    expect(r.status).toBe("ok");
+    expect(Date.now() - t).toBeLessThan(2000);
+  });
+});

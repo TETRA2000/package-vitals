@@ -148,6 +148,7 @@ function blockGroups(args: string): string[] {
 const GEM_LINE = /^gem(?:\s*\(\s*|\s+)(['"])([^'"]+)\1(.*)$/;
 const GROUP_BLOCK = /^group\b(.*?)\s+do(?:\s*\|[^|]*\|)?$/;
 const DO_BLOCK = /(?:^|[\s)\]}])do(?:\s*\|[^|]*\|)?$/;
+const MAX_DEPTH = 64;
 const OPENER = /^(?:if|unless|case|begin|while|until|def|class|module)\b/;
 
 /** Logical statements: comments cut, blank lines gone, a line ending in `,` or `\` joined to the next. */
@@ -174,7 +175,8 @@ function statements(text: string): string[] {
  * A gem declared more than once keeps `[]` if any declaration is in the default group, else the union.
  */
 export function parseGemfileGroups(text: string): Map<string, string[]> | null {
-  const declared = new Map<string, string[][]>();
+  // null: some declaration is in the default group. Otherwise the union so far.
+  const declared = new Map<string, Set<string> | null>();
   // One entry per open block: the groups a `group` block adds, empty for any other block.
   const stack: string[][] = [];
   for (const stmt of statements(text)) {
@@ -186,24 +188,30 @@ export function parseGemfileGroups(text: string): Map<string, string[]> | null {
     const gem = GEM_LINE.exec(stmt);
     if (gem) {
       const groups = [...stack.flat(), ...optionGroups(tokenize(gem[3]!))];
-      const list = declared.get(gem[2]!);
-      if (list) list.push(groups);
-      else declared.set(gem[2]!, [groups]);
+      const name = gem[2]!;
+      if (groups.length === 0) declared.set(name, null);
+      else if (!declared.has(name)) declared.set(name, new Set(groups));
+      else {
+        const have = declared.get(name);
+        if (have) for (const g of groups) have.add(g);
+      }
       continue;
     }
     const group = GROUP_BLOCK.exec(stmt);
     if (group) {
-      stack.push(blockGroups(group[1]!));
+      const names = blockGroups(group[1]!);
+      if (names.length > MAX_DEPTH) return null;
+      stack.push(names);
     } else if (DO_BLOCK.test(stmt) || OPENER.test(stmt)) {
       stack.push([]);
     }
+    // Deeper nesting than any real Gemfile has. Null keeps the groups unknown and bounds the work per gem.
+    if (stack.length > MAX_DEPTH) return null;
   }
   if (stack.length > 0) return null;
 
   const out = new Map<string, string[]>();
-  for (const [name, list] of declared) {
-    out.set(name, list.some((g) => g.length === 0) ? [] : [...new Set(list.flat())]);
-  }
+  for (const [name, set] of declared) out.set(name, set ? [...set] : []);
   return out;
 }
 
@@ -214,6 +222,7 @@ interface Spec {
   version: string;
   registry: boolean;
   deps: string[];
+  seen: Set<string>;
 }
 
 const SPEC_LINE = /^ {4}(\S+) \((.*)\)$/;
@@ -267,13 +276,17 @@ function readLock(text: string): { specs: Spec[]; direct: Set<string> } | "confl
             registry:
               section === "GEM" && remotes.length > 0 && remotes.every((r) => r === REGISTRY_REMOTE),
             deps: [],
+            seen: new Set(),
           };
           byKey.set(key, spec);
           specs.push(spec);
         }
       } else if (inSpecs && spec && line.startsWith("      ") && line[6] !== " ") {
         const m = DEP_LINE.exec(line);
-        if (m && !spec.deps.includes(m[1]!)) spec.deps.push(m[1]!);
+        if (m && !spec.seen.has(m[1]!)) {
+          spec.seen.add(m[1]!);
+          spec.deps.push(m[1]!);
+        }
       }
     } else if (section === "DEPENDENCIES") {
       const m = DIRECT_LINE.exec(line);
