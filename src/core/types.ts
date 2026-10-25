@@ -138,3 +138,6 @@ export interface ReportEntry {
   fileName: string;
   createdAt: string;
 }
+
+/** Package ecosystems the Checkup reads lockfiles for, named as Dependabot names them. */
+export type PackageEcosystem = 'npm' | 'rubygems';
