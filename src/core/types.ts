@@ -165,3 +165,20 @@ export interface Upgrade {
   from: string;
   to: string;
 }
+
+export type FindingSource = 'dependabot' | 'osv' | 'both';
+
+/** One open Dependabot alert, or one OSV advisory no alert accounts for, in one repo's project. */
+export interface FindingRecord {
+  alertNumber: number | null; source: FindingSource;
+  ecosystem: string; packageName: string; manifestPath: string;
+  advisoryId: string; cveId: string | null; severity: Severity; severitySource: SeveritySource;
+  summary: string; vulnerableRange: string | null; firstPatched: string | null;
+  createdAt: string | null;           // null: first seen in this snapshot (the store fills it in)
+  scope: 'runtime' | 'development' | null; githubRelationship: string | null;
+  installedVersions: string[]; relationship: Relationship | null;
+  chains: DependencyChain[]; chainCount: number;
+  lockfileRead: boolean; lockfileDevOnly: boolean | null; jsBundler: string | null;
+  tier: 'not_shipped' | null;
+  upgrades: Upgrade[] | null;         // filled in by the Checkup (Task 12)
+}
