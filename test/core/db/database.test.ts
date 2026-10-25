@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 import { openDatabase, transaction, type Db } from '../../../src/core/db/database.js';
-import { SCHEMA_VERSION } from '../../../src/core/db/schema.js';
+import { MIGRATIONS, SCHEMA_VERSION } from '../../../src/core/db/schema.js';
 
 const INSERT_SNAPSHOT = `INSERT INTO snapshots (owner_kind, owner_login, include_forks, include_archived, started_at, status)
   VALUES ('user', 'TETRA2000', 0, 0, '2026-10-24T00:00:00.000Z', 'running')`;
@@ -36,11 +37,44 @@ afterEach(() => {
 describe('openDatabase', () => {
   it('migrates a fresh database', () => {
     const db = track(openDatabase(':memory:'));
-    expect(SCHEMA_VERSION).toBe(1);
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
+    expect(SCHEMA_VERSION).toBe(2);
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
       .map((r) => (r as { name: string }).name);
-    expect(tables).toEqual(['alerts', 'reports', 'repos', 'sbom_packages', 'snapshot_repos', 'snapshots']);
+    expect(tables).toEqual(['alerts', 'direct_dependencies', 'findings', 'lockfiles', 'osv_advisories', 'reports', 'repos',
+      'sbom_packages', 'snapshot_repos', 'snapshots']);
+  });
+
+  it('migration 2 adds Level 1 tables and turns open alerts into findings', () => {
+    const file = tempFile();
+    mkdirSync(path.dirname(file), { recursive: true });
+    const v1 = new DatabaseSync(file);
+    v1.exec(MIGRATIONS[0]!);
+    v1.exec('PRAGMA user_version = 1');
+    v1.exec(INSERT_SNAPSHOT);
+    v1.exec("INSERT INTO repos (full_name, is_private, is_fork, is_archived) VALUES ('TETRA2000/slack-deck', 0, 0, 0)");
+    v1.exec("INSERT INTO snapshot_repos (snapshot_id, repo_id, alerts_status, sbom_status) VALUES (1, 1, 'ok', 'unavailable')");
+    const insertAlert = v1.prepare(`INSERT INTO alerts (snapshot_id, repo_id, number, state, ecosystem, package_name,
+      manifest_path, scope, relationship, ghsa_id, cve_id, severity, summary, vulnerable_range, first_patched, created_at)
+      VALUES (1, 1, ?, ?, 'npm', 'minimist', 'package-lock.json', 'runtime', 'transitive', ?, 'CVE-2021-44906', 'critical',
+      'Prototype Pollution in minimist', '< 0.2.4', '0.2.4', '2022-03-18T00:00:00Z')`);
+    insertAlert.run(41, 'open', 'GHSA-xvch-5gv4-984h');
+    insertAlert.run(42, 'dismissed', 'GHSA-vh95-rmgr-6w4m');
+    v1.close();
+
+    const db = track(openDatabase(file));
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    expect(db.prepare('SELECT osv_status, osv_error FROM snapshots').get()).toEqual({ osv_status: null, osv_error: null });
+    expect(db.prepare('SELECT lockfiles_status, lockfiles_error, tree_truncated FROM snapshot_repos').get())
+      .toEqual({ lockfiles_status: null, lockfiles_error: null, tree_truncated: 0 });
+    expect(db.prepare('SELECT * FROM findings').all()).toEqual([{
+      id: 1, snapshot_id: 1, repo_id: 1, alert_number: 41, source: 'dependabot', ecosystem: 'npm', package_name: 'minimist',
+      manifest_path: 'package-lock.json', advisory_id: 'GHSA-xvch-5gv4-984h', cve_id: 'CVE-2021-44906', severity: 'critical',
+      severity_source: 'advisory', summary: 'Prototype Pollution in minimist', vulnerable_range: '< 0.2.4',
+      first_patched: '0.2.4', created_at: '2022-03-18T00:00:00Z', scope: 'runtime', github_relationship: 'transitive',
+      installed_versions: '[]', relationship: null, chains: '[]', chain_count: 0, lockfile_read: 0, lockfile_dev_only: null,
+      js_bundler: null, tier: null, upgrades: null,
+    }]);
   });
 
   it('uses WAL for files and keeps data on reopen', () => {
@@ -51,7 +85,7 @@ describe('openDatabase', () => {
 
     const db = track(openDatabase(file));
     expect(db.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     expect(snapshotCount(db)).toBe(1);
   });
 
