@@ -158,3 +158,10 @@ export interface DependencyChain {
 }
 
 export type Relationship = 'direct' | 'transitive' | 'mixed';
+
+/** A direct dependency to move to a newer release, so that a vulnerable package it brings in goes away. */
+export interface Upgrade {
+  name: string;
+  from: string;
+  to: string;
+}
